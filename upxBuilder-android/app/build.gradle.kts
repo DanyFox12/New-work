@@ -69,10 +69,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Only attach the release signing config when a keystore is provided;
-            // otherwise the build still produces an (unsigned) minified release.
-            if (hasReleaseKeystore) {
-                signingConfig = signingConfigs.getByName("release")
+            // Use the release keystore when provided (UPX_KEYSTORE env vars);
+            // otherwise fall back to the auto-generated debug key so the APK is
+            // still installable. Either way the build is a full R8 release.
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
     }
