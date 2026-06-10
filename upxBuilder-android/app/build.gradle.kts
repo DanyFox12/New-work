@@ -15,13 +15,43 @@ android {
         versionName = "1.0.0"
     }
 
+    // Signing config is read from environment variables (or -P gradle properties)
+    // so the keystore and passwords NEVER live in the repository.
+    //   UPX_KEYSTORE           absolute path to your .jks keystore
+    //   UPX_KEYSTORE_PASSWORD  keystore password
+    //   UPX_KEY_ALIAS          key alias
+    //   UPX_KEY_PASSWORD       key password
+    fun secret(name: String): String? =
+        System.getenv(name) ?: (project.findProperty(name) as String?)
+
+    val hasReleaseKeystore = secret("UPX_KEYSTORE") != null
+
+    signingConfigs {
+        create("release") {
+            if (hasReleaseKeystore) {
+                storeFile = file(secret("UPX_KEYSTORE")!!)
+                storePassword = secret("UPX_KEYSTORE_PASSWORD")
+                keyAlias = secret("UPX_KEY_ALIAS")
+                keyPassword = secret("UPX_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: shrink + obfuscate code and strip unused resources so the app
+            // is hard to reverse-engineer.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Only attach the release signing config when a keystore is provided;
+            // otherwise the build still produces an (unsigned) minified release.
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

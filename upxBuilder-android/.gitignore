@@ -8,3 +8,9 @@ build/
 local.properties
 captures/
 .cxx/
+
+# Never commit signing material
+*.jks
+*.keystore
+keystore.properties
+key.properties
