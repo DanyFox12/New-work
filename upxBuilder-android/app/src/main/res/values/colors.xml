@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the Darcula editor background (Themes.darcula). -->
+    <color name="upx_window_background">#2B2B2B</color>
+    <color name="upx_icon_background">#2B2B2B</color>
+    <color name="upx_icon_accent">#4E94CE</color>
+</resources>

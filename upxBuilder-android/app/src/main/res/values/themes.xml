@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      A minimal no-action-bar theme. The real UI colours come from Compose
+      (MaterialTheme + the selected upxBuilder theme); this only sets up a clean
+      full-screen host for the Activity, with a dark splash window background that
+      matches the default Darcula theme.
+    -->
+    <style name="Theme.upxBuilder" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/upx_window_background</item>
+        <item name="android:statusBarColor">@color/upx_window_background</item>
+        <item name="android:navigationBarColor">@color/upx_window_background</item>
+    </style>
+</resources>

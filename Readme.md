@@ -6,18 +6,30 @@ writing and building **Flutter (Dart)**, **C++**, **Java** and **Kotlin**, with
 a friendly interface, **10 themes**, **4 UI languages** (Arabic, English,
 Chinese, Italian) and built-in coding instructions.
 
-It is written in **Kotlin** with **Compose Multiplatform for Desktop** (and uses
-C++/Java/Kotlin/Dart toolchains for building user projects).
+It is written in **Kotlin** and comes in two editions that share the same core
+(themes, languages, syntax highlighter, templates):
 
-➡️ **The application lives in [`upxBuilder/`](upxBuilder/).** See
-[`upxBuilder/README.md`](upxBuilder/README.md) for features, screenshots and how
-to run it.
+| Edition | Folder | Stack | Status |
+| --- | --- | --- | --- |
+| **Desktop** | [`upxBuilder/`](upxBuilder/) | Compose Multiplatform for Desktop | ✅ Compiles & runs (screenshots in `upxBuilder/docs/`) |
+| **Android** (mobile IDE, like AndroidIDE) | [`upxBuilder-android/`](upxBuilder-android/) | Jetpack Compose + Android Gradle Plugin | ✅ Full project; build it in Android Studio |
+
+See each folder's `README.md` for details, screenshots and how to run it.
 
 ## Quick start
+
+Desktop:
 
 ```bash
 cd upxBuilder
 ./gradlew run
+```
+
+Android (needs the Android SDK / Android Studio):
+
+```bash
+cd upxBuilder-android
+./gradlew assembleDebug
 ```
 
 ## What was delivered against the brief
