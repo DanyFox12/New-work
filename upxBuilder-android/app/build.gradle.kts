@@ -11,9 +11,21 @@ android {
     defaultConfig {
         applicationId = "com.upx.builder"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 4
-        versionName = "1.3.0"
+        // targetSdk 28 is deliberate and load-bearing: Android only permits an
+        // app to EXECUTE binaries from its own files dir (the $PREFIX toolchain,
+        // `pkg install …`) when targeting SDK <= 28. Termux and AndroidIDE pin
+        // the same level for the same reason. Raising this breaks the terminal's
+        // ability to run installed tools. (Fine for sideloading; Play Store
+        // would require 34+ and disallow this technique.)
+        targetSdk = 28
+        versionCode = 5
+        versionName = "1.4.0"
+    }
+
+    lint {
+        // We accept the old targetSdk on purpose (see above).
+        disable += "ExpiredTargetSdkVersion"
+        disable += "OldTargetApi"
     }
 
     // The native C++ code analyzer (libupxanalyzer.so) that powers the

@@ -26,16 +26,21 @@ templates and the in-app coding guides.
 - ✅ **Hardened release build** — R8 obfuscation + code/resource shrinking, with
   signing supplied via environment variables so secrets never enter the repo.
 
-## About building on-device
+## The terminal and on-device tools
 
-Real on-device *compilation* (the headline feature of AndroidIDE) requires
-bundling toolchains — a device-compatible JDK, Gradle and the Android SDK
-build-tools — which is a large, separate piece of work. In this edition the
-**Run / Build / Clean** actions invoke those tools through the system process
-runner and stream their output to the console; if a toolchain is not present on
-the device they report that cleanly rather than failing. The architecture
-(`project/BuildRunner.kt`) is the integration point where bundled toolchains
-(e.g. a Termux-style prefix) would be wired in next.
+upxBuilder has a **real terminal** (TERMINAL tab) that runs commands through the
+device shell with a Termux-style `$PREFIX` environment (`project/ToolchainManager.kt`).
+`pkg install busybox` genuinely downloads a static BusyBox for the device CPU
+into `$PREFIX/bin`, executes it, and links 300+ real Unix commands (ls, grep,
+vi, tar, wget, unzip, …). The app deliberately targets **SDK 28** because Android
+only allows executing app-private binaries at that level — the same technique
+Termux and AndroidIDE use (fine for sideloading; not allowed on the Play Store).
+
+Full compilers (clang, cmake, python, node) require packages built specifically
+for this app's prefix path — AndroidIDE maintains an entire build infrastructure
+for exactly this. With `$PREFIX`, the env plumbing, and `pkg` in place, adding
+them is now a packaging task; until then `pkg` reports honestly what is and
+isn't available, and Build/Run find any tool installed into the prefix.
 
 ## Requirements
 

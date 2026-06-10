@@ -16,6 +16,7 @@ import com.upx.builder.project.BuildLine
 import com.upx.builder.project.BuildRunner
 import com.upx.builder.project.OpenFile
 import com.upx.builder.project.Project
+import com.upx.builder.project.ToolchainManager
 import com.upx.builder.theme.AppTheme
 import com.upx.builder.theme.Themes
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +42,9 @@ class AppState(context: Context) {
     /** Where new projects are created — app-scoped, no runtime permission needed. */
     val projectsDir: File = File(context.getExternalFilesDir(null) ?: context.filesDir, "projects")
         .apply { mkdirs() }
+
+    /** On-device toolchain prefix (Termux-style): real tools live here. */
+    val toolchain = ToolchainManager(context.filesDir)
 
     var theme by mutableStateOf(Themes.byId(prefs.getString("theme", Themes.default.id) ?: Themes.default.id))
         private set
@@ -79,7 +83,7 @@ class AppState(context: Context) {
     var building by mutableStateOf(false)
         private set
 
-    private val buildRunner = BuildRunner()
+    private val buildRunner = BuildRunner(toolchain.environment())
 
     val activeFile: OpenFile? get() = openFiles.getOrNull(activeFileIndex)
 
@@ -209,6 +213,7 @@ class AppState(context: Context) {
 
         when {
             cmd == "clear" -> { terminalOutput.clear(); return }
+            cmd == "pkg" || cmd.startsWith("pkg ") -> { handlePkg(scope, cmd); return }
             cmd == "cd" || cmd.startsWith("cd ") -> {
                 val arg = cmd.removePrefix("cd").trim()
                 val target = when {
@@ -225,10 +230,11 @@ class AppState(context: Context) {
         val shell = listOf("/system/bin/sh", "/bin/sh").firstOrNull { File(it).exists() } ?: "sh"
         scope.launch(Dispatchers.IO) {
             try {
-                val process = ProcessBuilder(shell, "-c", cmd)
+                val builder = ProcessBuilder(shell, "-c", cmd)
                     .directory(cwd)
                     .redirectErrorStream(true)
-                    .start()
+                builder.environment().putAll(toolchain.environment())
+                val process = builder.start()
                 process.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { terminalOutput.add(BuildLine(it, false)) }
                 }
@@ -236,6 +242,45 @@ class AppState(context: Context) {
                 if (code != 0) terminalOutput.add(BuildLine("(exit $code)", true))
             } catch (e: Exception) {
                 terminalOutput.add(BuildLine("error: ${e.message}", true))
+            }
+        }
+    }
+
+    /**
+     * Built-in package manager. `pkg install busybox` genuinely downloads and
+     * installs a real BusyBox into $PREFIX/bin (300+ Unix commands). Other
+     * packages require toolchains built specifically for this app's prefix -
+     * reported honestly instead of pretending.
+     */
+    private fun handlePkg(scope: CoroutineScope, cmd: String) {
+        val parts = cmd.split(Regex("\\s+"))
+        val action = parts.getOrNull(1)
+        val target = parts.getOrNull(2)
+        when {
+            action == "install" && target == "busybox" -> {
+                if (toolchain.busyboxInstalled) {
+                    terminalOutput.add(BuildLine("busybox is already installed in PREFIX/bin.", false))
+                    return
+                }
+                scope.launch(Dispatchers.IO) {
+                    toolchain.installBusybox { line, isError ->
+                        terminalOutput.add(BuildLine(line, isError))
+                    }
+                }
+            }
+            action == "install" && target != null -> {
+                terminalOutput.add(BuildLine("'$target' is not available yet.", true))
+                terminalOutput.add(BuildLine("Available now: pkg install busybox  (ls, grep, vi, tar, wget, unzip + 300 more)", false))
+                terminalOutput.add(BuildLine("Compilers (clang, cmake, python, node) need packages built for this app's prefix - in development.", false))
+            }
+            action == "list" -> {
+                val tools = toolchain.bin.listFiles()?.map { it.name }?.sorted() ?: emptyList()
+                if (tools.isEmpty()) terminalOutput.add(BuildLine("No packages installed. Try: pkg install busybox", false))
+                else terminalOutput.add(BuildLine(tools.joinToString("  "), false))
+            }
+            else -> {
+                terminalOutput.add(BuildLine("usage: pkg install <name> | pkg list", false))
+                terminalOutput.add(BuildLine("available: busybox", false))
             }
         }
     }

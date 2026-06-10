@@ -17,10 +17,17 @@ data class BuildLine(val text: String, val isError: Boolean)
  * the runner reports that cleanly instead of crashing — upxBuilder edits code on
  * any machine, and builds where the SDKs are present.
  */
-class BuildRunner {
+class BuildRunner(
+    /** Extra environment (PATH, PREFIX, …) so tools installed into the app's
+     *  own toolchain prefix are found — empty on platforms without one. */
+    private val extraEnv: Map<String, String> = emptyMap(),
+) {
 
     @Volatile
     private var current: Process? = null
+
+    private fun searchPath(): List<String> =
+        (extraEnv["PATH"] ?: System.getenv("PATH") ?: "").split(":").filter { it.isNotBlank() }
 
     fun stop() {
         current?.destroy()
@@ -46,10 +53,11 @@ class BuildRunner {
 
         onLine(BuildLine("\$ ${command.joinToString(" ")}", false))
         return@withContext try {
-            val process = ProcessBuilder(command)
+            val builder = ProcessBuilder(command)
                 .directory(project.root)
                 .redirectErrorStream(true)
-                .start()
+            builder.environment().putAll(extraEnv)
+            val process = builder.start()
             current = process
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
@@ -107,10 +115,13 @@ class BuildRunner {
             Language.PLAIN -> null
         }
 
-    private fun isToolAvailable(tool: String): Boolean = try {
-        val which = if (System.getProperty("os.name").startsWith("Windows")) "where" else "which"
-        ProcessBuilder(which, tool).start().waitFor() == 0
-    } catch (_: Exception) {
-        false
+    private fun isToolAvailable(tool: String): Boolean {
+        if (searchPath().any { dir -> File(dir, tool).canExecute() }) return true
+        return try {
+            val which = if (System.getProperty("os.name").startsWith("Windows")) "where" else "which"
+            ProcessBuilder(which, tool).start().waitFor() == 0
+        } catch (_: Exception) {
+            false
+        }
     }
 }
