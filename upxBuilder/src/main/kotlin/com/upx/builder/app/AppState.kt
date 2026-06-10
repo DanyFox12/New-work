@@ -65,6 +65,9 @@ class AppState {
     /** Terminal working directory; `cd` changes it between commands. */
     var terminalCwd by mutableStateOf<File?>(null)
 
+    /** Prompt label shown by the terminal UI. */
+    val terminalPrompt: String get() = terminalCwd?.name ?: "~"
+
     var bottomTab by mutableStateOf(BottomTab.CONSOLE)
         private set
 

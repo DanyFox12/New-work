@@ -231,7 +231,7 @@ private fun TerminalPanel(state: AppState) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = (state.terminalCwd?.name ?: "~") + " $",
+                text = state.terminalPrompt + " $",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.primary,

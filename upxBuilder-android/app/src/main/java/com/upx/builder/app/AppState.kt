@@ -39,9 +39,17 @@ enum class BottomTab { CONSOLE, PROBLEMS, TERMINAL }
 class AppState(context: Context) {
     private val prefs = context.getSharedPreferences("upxbuilder", Context.MODE_PRIVATE)
 
-    /** Where new projects are created — app-scoped, no runtime permission needed. */
-    val projectsDir: File = File(context.getExternalFilesDir(null) ?: context.filesDir, "projects")
-        .apply { mkdirs() }
+    /** Where projects live. Internal storage on purpose: Android mounts external
+     *  storage `noexec`, so programs the user compiles could never run there.
+     *  Keeping projects internal lets `./a.out` work, exactly like Termux's home. */
+    val projectsDir: File = File(context.filesDir, "projects").apply {
+        val legacy = File(context.getExternalFilesDir(null) ?: context.filesDir, "projects")
+        val firstRun = !exists()
+        mkdirs()
+        if (firstRun && legacy != this && legacy.isDirectory) {
+            runCatching { legacy.copyRecursively(this, overwrite = false) }
+        }
+    }
 
     /** On-device toolchain prefix (Termux-style): real tools live here. */
     val toolchain = ToolchainManager(context.filesDir)
@@ -71,6 +79,15 @@ class AppState(context: Context) {
     /** Terminal working directory; `cd` changes it between commands. */
     var terminalCwd by mutableStateOf<File?>(null)
 
+    /** Working directory of the Alpine shell (may be an Alpine-only path like /root). */
+    var alpineCwd by mutableStateOf(projectsDir.absolutePath)
+        private set
+
+    /** Prompt label shown by the terminal UI. */
+    val terminalPrompt: String
+        get() = if (toolchain.alpineInstalled) alpineCwd.substringAfterLast('/').ifEmpty { "/" }
+        else terminalCwd?.name ?: "~"
+
     var bottomTab by mutableStateOf(BottomTab.CONSOLE)
         private set
 
@@ -88,6 +105,14 @@ class AppState(context: Context) {
         private set
 
     private val buildRunner = BuildRunner(toolchain.environment())
+
+    init {
+        if (toolchain.alpineInstalled) {
+            terminalOutput.add(BuildLine("Alpine Linux ready — every Linux command works. Add tools with: pkg install <name>", false))
+        } else {
+            terminalOutput.add(BuildLine("Welcome! Run 'pkg install alpine' once to unlock the full Linux environment (every command, like Termux).", false))
+        }
+    }
 
     val activeFile: OpenFile? get() = openFiles.getOrNull(activeFileIndex)
 
@@ -208,47 +233,38 @@ class AppState(context: Context) {
 
     /**
      * Runs a shell command in the in-app terminal and streams its output.
-     * `cd` and `clear` are handled internally; everything else goes to the
-     * system shell (`/system/bin/sh` on Android).
+     *
+     * Once Alpine Linux is installed, the terminal IS an Alpine shell — every
+     * command runs inside the full Linux environment (like Termux), with `cd`
+     * persisting between commands, including Alpine-only paths like /root.
+     * Before that, commands go to the host shell (`/system/bin/sh` + busybox).
      */
     fun runTerminal(scope: CoroutineScope, command: String) {
         val cmd = command.trim()
         if (cmd.isEmpty()) return
-        val cwd = terminalCwd ?: (project?.root ?: projectsDir).also { terminalCwd = it }
-        terminalOutput.add(BuildLine("${cwd.name} $ $cmd", false))
+        terminalOutput.add(BuildLine("$terminalPrompt $ $cmd", false))
 
         when {
             cmd == "clear" -> { terminalOutput.clear(); return }
             cmd == "pkg" || cmd.startsWith("pkg ") -> { handlePkg(scope, cmd); return }
-            cmd == "alpine" || cmd.startsWith("alpine ") -> {
-                val inner = cmd.removePrefix("alpine").trim()
-                if (inner.isEmpty()) {
-                    terminalOutput.add(BuildLine("usage: alpine <command>   (runs the command inside Alpine Linux)", false))
-                } else {
-                    runInAlpineFromTerminal(scope, inner, cwd)
-                }
-                return
-            }
-            cmd == "cd" || cmd.startsWith("cd ") -> {
-                val arg = cmd.removePrefix("cd").trim()
-                val target = when {
-                    arg.isEmpty() -> project?.root ?: projectsDir
-                    arg.startsWith("/") -> File(arg)
-                    else -> File(cwd, arg)
-                }
-                if (target.isDirectory) terminalCwd = target.canonicalFile
-                else terminalOutput.add(BuildLine("cd: no such directory: $arg", true))
-                return
-            }
         }
 
-        // Tools that are not on the host (cmake, clang, python3, node, …) run
-        // inside the Alpine environment automatically once it is installed.
-        val firstWord = cmd.split(Regex("\\s+")).first()
-        val onHost = toolchain.environment()["PATH"].orEmpty().split(":")
-            .any { dir -> dir.isNotBlank() && File(dir, firstWord).canExecute() }
-        if (!onHost && toolchain.alpineInstalled) {
-            runInAlpineFromTerminal(scope, cmd, cwd)
+        if (toolchain.alpineInstalled) {
+            runAlpineShell(scope, cmd)
+            return
+        }
+
+        // ---- Host fallback (before Alpine is installed) ----
+        val cwd = terminalCwd ?: (project?.root ?: projectsDir).also { terminalCwd = it }
+        if (cmd == "cd" || cmd.startsWith("cd ")) {
+            val arg = cmd.removePrefix("cd").trim()
+            val target = when {
+                arg.isEmpty() -> project?.root ?: projectsDir
+                arg.startsWith("/") -> File(arg)
+                else -> File(cwd, arg)
+            }
+            if (target.isDirectory) terminalCwd = target.canonicalFile
+            else terminalOutput.add(BuildLine("cd: no such directory: $arg", true))
             return
         }
 
@@ -268,6 +284,30 @@ class AppState(context: Context) {
             } catch (e: Exception) {
                 terminalOutput.add(BuildLine("error: ${e.message}", true))
             }
+        }
+    }
+
+    /**
+     * Runs [cmd] in the Alpine shell. The working directory persists between
+     * commands: the wrapper script re-enters [alpineCwd], runs the command,
+     * then reports the resulting directory back on a marker line.
+     */
+    private fun runAlpineShell(scope: CoroutineScope, cmd: String) {
+        scope.launch(Dispatchers.IO) {
+            val marker = "__UPXCWD__"
+            val script = buildString {
+                append("cd \"").append(alpineCwd).append("\" 2>/dev/null || cd /root\n")
+                append(cmd).append("\n")
+                append("__upx_rc=\$?\n")
+                append("printf '").append(marker).append("%s\\n' \"\$PWD\"\n")
+                append("exit \$__upx_rc\n")
+            }
+            val binds = listOf(projectsDir, toolchain.home)
+            val code = toolchain.runInAlpine(script, null, binds) { line, isError ->
+                if (line.startsWith(marker)) alpineCwd = line.removePrefix(marker)
+                else terminalOutput.add(BuildLine(line, isError))
+            }
+            if (code != 0) terminalOutput.add(BuildLine("(exit $code)", true))
         }
     }
 
