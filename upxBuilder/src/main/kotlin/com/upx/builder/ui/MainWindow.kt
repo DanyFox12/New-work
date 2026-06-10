@@ -55,7 +55,11 @@ fun MainWindow(state: AppState) {
                 val consoleHeight: Dp = if (maxHeight < 700.dp) 150.dp else 200.dp
 
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Column(modifier = Modifier.fillMaxSize()) {
+                    if (state.bottomPanelExpanded) {
+                        // Termux-style: the terminal/console panel takes over 100% of
+                        // the screen; its fullscreen-exit button restores the IDE.
+                        BottomPanel(state, modifier = Modifier.fillMaxSize())
+                    } else Column(modifier = Modifier.fillMaxSize()) {
                         TopBar(
                             state = state,
                             compact = compact,
@@ -93,7 +97,7 @@ fun MainWindow(state: AppState) {
 
                 // Phone drawer: covers ~72% of the width so the code stays visible
                 // behind it; tapping the dimmed code area closes it.
-                if (compact && state.projectPanelVisible && state.project != null) {
+                if (compact && state.projectPanelVisible && state.project != null && !state.bottomPanelExpanded) {
                     Row(
                         modifier = Modifier
                             .fillMaxSize()

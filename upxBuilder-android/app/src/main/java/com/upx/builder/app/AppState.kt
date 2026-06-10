@@ -77,6 +77,10 @@ class AppState(context: Context) {
     var consoleVisible by mutableStateOf(true)
         private set
 
+    /** When true the bottom panel (terminal/console) covers the whole screen, Termux-style. */
+    var bottomPanelExpanded by mutableStateOf(false)
+        private set
+
     var projectPanelVisible by mutableStateOf(true)
         private set
 
@@ -100,6 +104,8 @@ class AppState(context: Context) {
     }
 
     fun toggleConsole() { consoleVisible = !consoleVisible }
+
+    fun toggleBottomPanelExpanded() { bottomPanelExpanded = !bottomPanelExpanded }
     fun toggleProjectPanel() { projectPanelVisible = !projectPanelVisible }
     fun hideProjectPanel() { projectPanelVisible = false }
     fun selectBottomTab(tab: BottomTab) { bottomTab = tab }

@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
@@ -90,6 +92,14 @@ fun BottomPanel(state: AppState, modifier: Modifier = Modifier) {
                 IconButton(onClick = { state.clearTerminal() }) {
                     Icon(Icons.Filled.ClearAll, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurface)
                 }
+            }
+            // Termux-style: expand the panel to cover the whole screen and back.
+            IconButton(onClick = { state.toggleBottomPanelExpanded() }) {
+                Icon(
+                    if (state.bottomPanelExpanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                    contentDescription = "Fullscreen",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
         }
         when (state.bottomTab) {
