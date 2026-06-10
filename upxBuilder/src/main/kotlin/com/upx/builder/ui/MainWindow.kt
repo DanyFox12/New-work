@@ -64,7 +64,10 @@ fun MainWindow(state: AppState) {
                         )
 
                         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                            if (state.projectPanelVisible) {
+                            // On compact screens an empty project panel would hide the
+                            // welcome screen, so it only appears once a project is open.
+                            val showPanel = state.projectPanelVisible && (!compact || state.project != null)
+                            if (showPanel) {
                                 if (compact) {
                                     // On phones the project tree takes the whole content
                                     // area and closes itself when a file is opened.
@@ -82,7 +85,7 @@ fun MainWindow(state: AppState) {
                                 }
                             }
 
-                            if (!(compact && state.projectPanelVisible)) {
+                            if (!(compact && showPanel)) {
                                 Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                                     EditorAndConsole(
                                         state = state,

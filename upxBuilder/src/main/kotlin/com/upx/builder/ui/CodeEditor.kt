@@ -1,14 +1,20 @@
 package com.upx.builder.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -19,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -36,8 +43,8 @@ import com.upx.builder.theme.AppTheme
 
 /**
  * A scrollable code editor with a line-number gutter, live syntax highlighting,
- * auto-indentation on Enter, and auto-closing brackets — the conveniences that
- * make typing code on a phone or desktop much faster.
+ * auto-indentation, auto-closing brackets, and a completion bar that suggests
+ * language keywords and identifiers from the file as you type.
  */
 @Composable
 fun CodeEditor(
@@ -70,40 +77,111 @@ fun CodeEditor(
         }
     }
 
-    Row(modifier = modifier.background(theme.editorBackground).verticalScroll(scroll)) {
-        // Line-number gutter
-        Column(
-            modifier = Modifier
-                .background(theme.gutterBackground)
-                .fillMaxHeight()
-                .width(48.dp)
-                .padding(top = 8.dp, end = 8.dp),
-            horizontalAlignment = Alignment.End,
-        ) {
-            for (n in 1..lineCount) {
-                Text(
-                    text = n.toString(),
-                    style = mono.copy(color = theme.lineNumber, textAlign = TextAlign.End),
-                )
+    // ----- Code completion -----
+    val cursor = value.selection.start
+    val prefixStart = wordStart(value.text, cursor)
+    val prefix = if (value.selection.collapsed && cursor <= value.text.length) {
+        value.text.substring(prefixStart, cursor)
+    } else ""
+    val suggestions = buildSuggestions(value.text, prefix, language)
+
+    fun accept(suggestion: String) {
+        val newText = value.text.substring(0, prefixStart) + suggestion + value.text.substring(cursor)
+        val v = TextFieldValue(newText, TextRange(prefixStart + suggestion.length))
+        value = v
+        onTextChange(v.text)
+    }
+
+    Column(modifier = modifier) {
+        if (suggestions.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(theme.gutterBackground)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                suggestions.forEach { s ->
+                    val isKeyword = s in language.keywords
+                    Text(
+                        text = s,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        color = if (isKeyword) theme.syntax.keyword else theme.syntax.plain,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(theme.editorBackground)
+                            .clickable { accept(s) }
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
             }
         }
 
-        // Editing surface
-        Box(modifier = Modifier.fillMaxSize().padding(start = 8.dp, top = 8.dp)) {
-            BasicTextField(
-                value = value,
-                onValueChange = { new ->
-                    val assisted = applyEditorAssists(value, new)
-                    value = assisted
-                    onTextChange(assisted.text)
-                },
-                textStyle = mono.copy(color = theme.syntax.plain),
-                cursorBrush = SolidColor(theme.accent),
-                visualTransformation = highlight,
-                modifier = Modifier.fillMaxSize(),
-            )
+        Row(modifier = Modifier.weight(1f).fillMaxWidth().background(theme.editorBackground).verticalScroll(scroll)) {
+            // Line-number gutter
+            Column(
+                modifier = Modifier
+                    .background(theme.gutterBackground)
+                    .fillMaxHeight()
+                    .width(48.dp)
+                    .padding(top = 8.dp, end = 8.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                for (n in 1..lineCount) {
+                    Text(
+                        text = n.toString(),
+                        style = mono.copy(color = theme.lineNumber, textAlign = TextAlign.End),
+                    )
+                }
+            }
+
+            // Editing surface
+            Box(modifier = Modifier.fillMaxSize().padding(start = 8.dp, top = 8.dp)) {
+                BasicTextField(
+                    value = value,
+                    onValueChange = { new ->
+                        val assisted = applyEditorAssists(value, new)
+                        value = assisted
+                        onTextChange(assisted.text)
+                    },
+                    textStyle = mono.copy(color = theme.syntax.plain),
+                    cursorBrush = SolidColor(theme.accent),
+                    visualTransformation = highlight,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
+}
+
+/** Index where the identifier containing/preceding [cursor] starts. */
+private fun wordStart(text: String, cursor: Int): Int {
+    var s = cursor.coerceIn(0, text.length)
+    while (s > 0 && (text[s - 1].isLetterOrDigit() || text[s - 1] == '_')) s--
+    return s
+}
+
+private val identifierRegex = Regex("[A-Za-z_][A-Za-z0-9_]{2,}")
+
+/**
+ * Completion candidates for the word being typed: language keywords first,
+ * then identifiers already present in the file. Shown after 2+ characters.
+ */
+private fun buildSuggestions(text: String, prefix: String, language: Language): List<String> {
+    if (prefix.length < 2) return emptyList()
+    val fromKeywords = language.keywords
+        .filter { it.startsWith(prefix) && it != prefix }
+        .sorted()
+    val fromFile = identifierRegex.findAll(text)
+        .map { it.value }
+        .filter { it.startsWith(prefix) && it != prefix && it !in language.keywords }
+        .distinct()
+        .sorted()
+        .toList()
+    return (fromKeywords + fromFile).take(8)
 }
 
 /**

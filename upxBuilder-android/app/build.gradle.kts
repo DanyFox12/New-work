@@ -12,8 +12,8 @@ android {
         applicationId = "com.upx.builder"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     // The native C++ code analyzer (libupxanalyzer.so) that powers the
