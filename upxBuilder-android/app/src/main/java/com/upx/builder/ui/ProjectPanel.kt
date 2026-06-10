@@ -34,7 +34,11 @@ import com.upx.builder.i18n.StringKey
 import com.upx.builder.project.FileNode
 
 @Composable
-fun ProjectPanel(state: AppState, modifier: Modifier = Modifier) {
+fun ProjectPanel(
+    state: AppState,
+    modifier: Modifier = Modifier,
+    onFileOpened: () -> Unit = {},
+) {
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     Column(
         modifier = modifier
@@ -57,7 +61,7 @@ fun ProjectPanel(state: AppState, modifier: Modifier = Modifier) {
             )
         } else {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                FileTreeNode(FileNode.of(project.root), 0, expanded, state)
+                FileTreeNode(FileNode.of(project.root), 0, expanded, state, onFileOpened)
             }
         }
     }
@@ -69,6 +73,7 @@ private fun FileTreeNode(
     depth: Int,
     expanded: MutableMap<String, Boolean>,
     state: AppState,
+    onFileOpened: () -> Unit,
 ) {
     val path = node.file.absolutePath
     val isOpen = expanded[path] ?: (depth == 0)
@@ -82,8 +87,12 @@ private fun FileTreeNode(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                if (node.isDirectory) expanded[path] = !isOpen
-                else state.openFile(node.file)
+                if (node.isDirectory) {
+                    expanded[path] = !isOpen
+                } else {
+                    state.openFile(node.file)
+                    onFileOpened()
+                }
             }
             .padding(start = (8 + depth * 14).dp, top = 3.dp, bottom = 3.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -108,7 +117,7 @@ private fun FileTreeNode(
 
     if (node.isDirectory && isOpen) {
         node.children().forEach { child ->
-            FileTreeNode(child, depth + 1, expanded, state)
+            FileTreeNode(child, depth + 1, expanded, state, onFileOpened)
         }
     }
 }

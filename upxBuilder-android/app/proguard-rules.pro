@@ -15,6 +15,13 @@
 # The single Activity entry point referenced from the manifest.
 -keep class com.upx.builder.MainActivity { *; }
 
+# JNI: the native library resolves these by exact name — they must survive
+# obfuscation or libupxanalyzer.so cannot bind to them.
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+-keep class com.upx.builder.editor.NativeAnalyzer { *; }
+
 # Silence harmless warnings from optional/transitive annotations.
 -dontwarn org.jetbrains.annotations.**
 -dontwarn kotlin.**

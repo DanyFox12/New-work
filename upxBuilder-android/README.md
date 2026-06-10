@@ -11,11 +11,20 @@ templates and the in-app coding guides.
 
 ## What works on the device
 
-- ✅ **Full IDE UI** — toolbar, project explorer, editor tabs, line-numbered code
-  editor with live syntax highlighting, console and status bar.
-- ✅ **Create & edit projects** — Flutter, C++, Java and Kotlin templates are
-  written into the app's own storage; edit and save files directly on the phone.
-- ✅ **10 themes & 4 languages**, persisted between launches.
+- ✅ **Full IDE UI** — adaptive toolbar (with overflow menu on narrow screens),
+  project explorer, editor tabs, line-numbered code editor with live syntax
+  highlighting, console, problems panel and status bar. The layout adapts to any
+  screen size and orientation, and rotation does not lose your work.
+- ✅ **7 language templates** — Flutter (Dart), C++, Java, Kotlin, Python,
+  JavaScript and Go — created in the app's own storage and edited on the phone.
+- ✅ **Native C++ code analyzer** — a fast NDK-built engine (`libupxanalyzer.so`)
+  scans your code as you type and reports problems (unbalanced brackets,
+  unterminated strings, TODO/FIXME, overlong lines) in the Problems panel, with
+  live error/warning counts in the status bar.
+- ✅ **Smart editing** — auto-indent on Enter and auto-closing brackets.
+- ✅ **10 themes & 4 UI languages**, persisted between launches.
+- ✅ **Hardened release build** — R8 obfuscation + code/resource shrinking, with
+  signing supplied via environment variables so secrets never enter the repo.
 
 ## About building on-device
 
@@ -53,7 +62,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 ## Tech stack & versions
 
-- Kotlin **1.9.24**, Android Gradle Plugin **8.5.2**, Gradle **8.7**
+- Kotlin **1.9.24**, Android Gradle Plugin **8.5.2**, Gradle **8.7**, NDK **26.1** + CMake **3.22** (for the C++ analyzer)
 - Jetpack Compose via **Compose BOM 2024.06.00** (Compose compiler ext **1.5.14**)
 - Material 3, `material-icons-extended`
 - `compileSdk` 34, `minSdk` 24, `targetSdk` 34

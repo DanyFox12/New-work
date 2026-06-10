@@ -20,26 +20,26 @@ object SyntaxHighlighter {
         if (language == Language.PLAIN || code.isEmpty()) {
             return AnnotatedString(code, spanStyle = SpanStyle(color = palette.plain))
         }
+        val cStyleComments = language.lineComment == "//"
         return buildAnnotatedString {
             var i = 0
             val n = code.length
             while (i < n) {
                 val c = code[i]
                 when {
-                    // Line comment
-                    c == '/' && i + 1 < n && code[i + 1] == '/' -> {
+                    // Line comment (// for C-like languages, # for Python and config files)
+                    cStyleComments && c == '/' && i + 1 < n && code[i + 1] == '/' -> {
                         val end = code.indexOf('\n', i).let { if (it == -1) n else it }
                         withStyle(SpanStyle(color = palette.comment)) { append(code.substring(i, end)) }
                         i = end
                     }
-                    // Hash comment (yaml/pubspec-ish, harmless for code)
-                    c == '#' -> {
+                    !cStyleComments && c == '#' -> {
                         val end = code.indexOf('\n', i).let { if (it == -1) n else it }
                         withStyle(SpanStyle(color = palette.comment)) { append(code.substring(i, end)) }
                         i = end
                     }
-                    // Block comment
-                    c == '/' && i + 1 < n && code[i + 1] == '*' -> {
+                    // Block comment (C-like languages only)
+                    cStyleComments && c == '/' && i + 1 < n && code[i + 1] == '*' -> {
                         val close = code.indexOf("*/", i + 2)
                         val end = if (close == -1) n else close + 2
                         withStyle(SpanStyle(color = palette.comment)) { append(code.substring(i, end)) }

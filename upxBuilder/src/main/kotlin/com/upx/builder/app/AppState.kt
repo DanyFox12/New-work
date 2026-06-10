@@ -4,6 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.upx.builder.editor.Diagnostic
+import com.upx.builder.editor.DiagnosticsEngine
 import com.upx.builder.editor.Language
 import com.upx.builder.i18n.AppLanguage
 import com.upx.builder.i18n.StringKey
@@ -19,6 +21,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.prefs.Preferences
+
+/** Which tab the bottom panel is showing. */
+enum class BottomTab { CONSOLE, PROBLEMS }
 
 /**
  * Single source of truth for the running application: the active theme, UI
@@ -45,6 +50,12 @@ class AppState {
         private set
 
     val consoleOutput = mutableStateListOf<BuildLine>()
+
+    /** Live problems found in the active file by the diagnostics engine. */
+    val diagnostics = mutableStateListOf<Diagnostic>()
+
+    var bottomTab by mutableStateOf(BottomTab.CONSOLE)
+        private set
 
     var consoleVisible by mutableStateOf(true)
         private set
@@ -73,6 +84,8 @@ class AppState {
 
     fun toggleConsole() { consoleVisible = !consoleVisible }
     fun toggleProjectPanel() { projectPanelVisible = !projectPanelVisible }
+    fun hideProjectPanel() { projectPanelVisible = false }
+    fun selectBottomTab(tab: BottomTab) { bottomTab = tab }
 
     fun openProject(root: File) {
         project = Project(root.name, root)
@@ -83,15 +96,20 @@ class AppState {
         val existing = openFiles.indexOfFirst { it.file == file }
         if (existing >= 0) {
             activeFileIndex = existing
+            refreshDiagnostics()
             return
         }
         val content = runCatching { file.readText() }.getOrDefault("")
         openFiles.add(OpenFile(file, content))
         activeFileIndex = openFiles.lastIndex
+        refreshDiagnostics()
     }
 
     fun selectTab(index: Int) {
-        if (index in openFiles.indices) activeFileIndex = index
+        if (index in openFiles.indices) {
+            activeFileIndex = index
+            refreshDiagnostics()
+        }
     }
 
     fun closeTab(index: Int) {
@@ -102,6 +120,7 @@ class AppState {
             activeFileIndex >= openFiles.size -> openFiles.lastIndex
             else -> activeFileIndex.coerceAtMost(openFiles.lastIndex)
         }
+        refreshDiagnostics()
     }
 
     fun updateActiveContent(newText: String) {
@@ -109,6 +128,13 @@ class AppState {
         val current = openFiles.getOrNull(idx) ?: return
         if (current.content == newText) return
         openFiles[idx] = current.copy(content = newText, dirty = true)
+        refreshDiagnostics()
+    }
+
+    private fun refreshDiagnostics() {
+        diagnostics.clear()
+        val file = activeFile ?: return
+        diagnostics.addAll(DiagnosticsEngine.analyze(file.content, Language.fromFileName(file.name)))
     }
 
     fun saveActive() {

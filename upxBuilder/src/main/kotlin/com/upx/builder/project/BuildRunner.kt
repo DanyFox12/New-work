@@ -89,6 +89,21 @@ class BuildRunner {
                 BuildAction.RUN -> listOf("gradle", "run")
                 BuildAction.CLEAN -> listOf("gradle", "clean")
             }
+            Language.PYTHON -> when (action) {
+                BuildAction.BUILD -> listOf("python3", "-m", "py_compile", "main.py")
+                BuildAction.RUN -> listOf("python3", "main.py")
+                BuildAction.CLEAN -> listOf("rm", "-rf", "__pycache__")
+            }
+            Language.JAVASCRIPT -> when (action) {
+                BuildAction.BUILD -> listOf("node", "--check", "index.js")
+                BuildAction.RUN -> listOf("node", "index.js")
+                BuildAction.CLEAN -> listOf("rm", "-rf", "node_modules")
+            }
+            Language.GO -> when (action) {
+                BuildAction.BUILD -> listOf("go", "build", "./...")
+                BuildAction.RUN -> listOf("go", "run", ".")
+                BuildAction.CLEAN -> listOf("go", "clean")
+            }
             Language.PLAIN -> null
         }
 

@@ -23,7 +23,7 @@ enum class Language(
     ),
     CPP(
         displayName = "C++",
-        extensions = listOf("cpp", "cc", "cxx", "h", "hpp", "hh"),
+        extensions = listOf("cpp", "cc", "cxx", "h", "hpp", "hh", "c"),
         keywords = setOf(
             "alignas", "alignof", "auto", "bool", "break", "case", "catch", "char", "class",
             "const", "constexpr", "continue", "decltype", "default", "delete", "do", "double",
@@ -63,9 +63,46 @@ enum class Language(
         ),
         lineComment = "//",
     ),
+    PYTHON(
+        displayName = "Python",
+        extensions = listOf("py", "pyw"),
+        keywords = setOf(
+            "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
+            "continue", "def", "del", "elif", "else", "except", "finally", "for", "from",
+            "global", "if", "import", "in", "is", "lambda", "match", "case", "nonlocal", "not",
+            "or", "pass", "raise", "return", "self", "try", "while", "with", "yield",
+        ),
+        lineComment = "#",
+    ),
+    JAVASCRIPT(
+        displayName = "JavaScript / TS",
+        extensions = listOf("js", "jsx", "ts", "tsx", "mjs", "cjs"),
+        keywords = setOf(
+            "abstract", "any", "as", "async", "await", "boolean", "break", "case", "catch",
+            "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum",
+            "export", "extends", "false", "finally", "for", "from", "function", "get", "if",
+            "implements", "import", "in", "instanceof", "interface", "let", "new", "null", "number",
+            "of", "package", "private", "protected", "public", "readonly", "return", "set",
+            "static", "string", "super", "switch", "this", "throw", "true", "try", "type",
+            "typeof", "undefined", "var", "void", "while", "with", "yield",
+        ),
+        lineComment = "//",
+    ),
+    GO(
+        displayName = "Go",
+        extensions = listOf("go"),
+        keywords = setOf(
+            "break", "case", "chan", "const", "continue", "default", "defer", "else",
+            "fallthrough", "false", "for", "func", "go", "goto", "if", "import", "interface",
+            "iota", "map", "nil", "package", "range", "return", "select", "struct", "switch",
+            "true", "type", "var", "append", "cap", "close", "copy", "delete", "len", "make",
+            "new", "panic", "print", "println", "recover",
+        ),
+        lineComment = "//",
+    ),
     PLAIN(
         displayName = "Plain Text",
-        extensions = listOf("txt", "md", "yaml", "yml", "json", "gradle", "xml"),
+        extensions = listOf("txt", "md", "yaml", "yml", "json", "gradle", "xml", "html", "css"),
         keywords = emptySet(),
         lineComment = "#",
     );

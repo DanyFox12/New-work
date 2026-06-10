@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+)
 
 package com.upx.builder.ui
 
@@ -10,8 +13,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -58,17 +64,24 @@ fun NewProjectDialog(state: AppState, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(state.tr(StringKey.CREATE_NEW)) },
         text = {
-            Column(modifier = Modifier.width(520.dp).verticalScroll(rememberScrollState())) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Templates.all.forEach { template ->
                         TemplateChip(
-                            template = template,
                             selected = template == selected,
                             label = templateLabel(state, template),
                             onClick = { selected = template },
                         )
                     }
-                }
+                } // FlowRow
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
                     value = name,
@@ -126,7 +139,7 @@ private fun templateLabel(state: AppState, template: ProjectTemplate): String = 
 }
 
 @Composable
-private fun TemplateChip(template: ProjectTemplate, selected: Boolean, label: String, onClick: () -> Unit) {
+private fun TemplateChip(selected: Boolean, label: String, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(
@@ -151,7 +164,7 @@ fun ThemeDialog(state: AppState, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(state.tr(StringKey.CHOOSE_THEME)) },
         text = {
-            LazyColumn(modifier = Modifier.width(420.dp).height(420.dp)) {
+            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
                 items(Themes.all) { theme ->
                     val isCurrent = theme.id == state.theme.id
                     Row(
@@ -200,7 +213,7 @@ fun LanguageDialog(state: AppState, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(state.tr(StringKey.CHOOSE_LANGUAGE)) },
         text = {
-            Column(modifier = Modifier.width(320.dp)) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 AppLanguage.entries.forEach { lang ->
                     val isCurrent = lang == state.language
                     Row(
@@ -236,7 +249,12 @@ fun GuideDialog(state: AppState, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(state.tr(StringKey.GUIDE_TITLE)) },
         text = {
-            Column(modifier = Modifier.width(520.dp).height(440.dp).verticalScroll(rememberScrollState())) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 Templates.all.forEach { template ->
                     Text(
                         text = template.language.displayName,

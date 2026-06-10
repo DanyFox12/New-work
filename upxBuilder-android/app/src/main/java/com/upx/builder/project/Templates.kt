@@ -225,7 +225,111 @@ object Templates {
         },
     )
 
-    val all: List<ProjectTemplate> = listOf(flutter, cpp, java, kotlin)
+    val python = ProjectTemplate(
+        id = "python",
+        displayName = "Python Project",
+        language = Language.PYTHON,
+        description = "A Python script project.",
+        guide = """
+            # Writing Python code
+
+            1. Execution starts at the top of the file; guard entry with
+               `if __name__ == "__main__":`.
+            2. Indentation IS the syntax — use 4 spaces per level, consistently.
+            3. Run with `python3 main.py`; no compilation step needed.
+            4. Install packages with `pip install <name>` (use a virtualenv).
+            5. Functions are defined with `def`, classes with `class`.
+
+            Tip: f-strings (`f"x = {x}"`) are the cleanest way to format text.
+        """.trimIndent(),
+        files = { name ->
+            mapOf(
+                "main.py" to """
+                    def greet(name: str) -> str:
+                        return f"Hello from {name}!"
+
+
+                    if __name__ == "__main__":
+                        print(greet("$name"))
+                """.trimIndent(),
+                "README.md" to "# $name\n\nA Python project created with upxBuilder. Run with `python3 main.py`.\n",
+            )
+        },
+    )
+
+    val javascript = ProjectTemplate(
+        id = "javascript",
+        displayName = "JavaScript Project",
+        language = Language.JAVASCRIPT,
+        description = "A Node.js JavaScript project.",
+        guide = """
+            # Writing JavaScript code
+
+            1. Run with Node.js: `node index.js`.
+            2. Use `const` by default, `let` when you must reassign — avoid `var`.
+            3. Functions: `function f() {}` or arrows `const f = () => {}`.
+            4. Add packages with `npm install <name>`; they land in node_modules.
+            5. Use `async`/`await` for asynchronous work instead of raw callbacks.
+
+            Tip: template literals (`` `x = ${'$'}{x}` ``) make string building easy.
+        """.trimIndent(),
+        files = { name ->
+            mapOf(
+                "index.js" to """
+                    function greet(name) {
+                      return `Hello from ${'$'}{name}!`;
+                    }
+
+                    console.log(greet("$name"));
+                """.trimIndent(),
+                "package.json" to """
+                    {
+                      "name": "${name.lowercase()}",
+                      "version": "1.0.0",
+                      "main": "index.js",
+                      "scripts": { "start": "node index.js" }
+                    }
+                """.trimIndent(),
+                "README.md" to "# $name\n\nA JavaScript project created with upxBuilder. Run with `node index.js`.\n",
+            )
+        },
+    )
+
+    val go = ProjectTemplate(
+        id = "go",
+        displayName = "Go Project",
+        language = Language.GO,
+        description = "A Go module project.",
+        guide = """
+            # Writing Go code
+
+            1. Every file starts with `package <name>`; the entry point is
+               `func main()` in package main.
+            2. Run with `go run .`, build a binary with `go build`.
+            3. Unused imports and variables are compile errors — keep code tidy.
+            4. Errors are values: check `if err != nil { ... }` after calls.
+            5. Format automatically with `gofmt -w .` — Go has one true style.
+
+            Tip: goroutines (`go f()`) and channels make concurrency simple.
+        """.trimIndent(),
+        files = { name ->
+            mapOf(
+                "go.mod" to "module ${name.lowercase()}\n\ngo 1.21\n",
+                "main.go" to """
+                    package main
+
+                    import "fmt"
+
+                    func main() {
+                        fmt.Println("Hello from $name!")
+                    }
+                """.trimIndent(),
+                "README.md" to "# $name\n\nA Go project created with upxBuilder. Run with `go run .`.\n",
+            )
+        },
+    )
+
+    val all: List<ProjectTemplate> = listOf(flutter, cpp, java, kotlin, python, javascript, go)
 
     fun byId(id: String): ProjectTemplate? = all.firstOrNull { it.id == id }
 }

@@ -6,13 +6,23 @@ plugins {
 android {
     namespace = "com.upx.builder"
     compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "com.upx.builder"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
+    }
+
+    // The native C++ code analyzer (libupxanalyzer.so) that powers the
+    // Problems panel — built with the NDK via CMake.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // Signing config is read from environment variables (or -P gradle properties)
