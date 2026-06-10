@@ -220,6 +220,15 @@ class AppState(context: Context) {
         when {
             cmd == "clear" -> { terminalOutput.clear(); return }
             cmd == "pkg" || cmd.startsWith("pkg ") -> { handlePkg(scope, cmd); return }
+            cmd == "alpine" || cmd.startsWith("alpine ") -> {
+                val inner = cmd.removePrefix("alpine").trim()
+                if (inner.isEmpty()) {
+                    terminalOutput.add(BuildLine("usage: alpine <command>   (runs the command inside Alpine Linux)", false))
+                } else {
+                    runInAlpineFromTerminal(scope, inner, cwd)
+                }
+                return
+            }
             cmd == "cd" || cmd.startsWith("cd ") -> {
                 val arg = cmd.removePrefix("cd").trim()
                 val target = when {
@@ -231,6 +240,16 @@ class AppState(context: Context) {
                 else terminalOutput.add(BuildLine("cd: no such directory: $arg", true))
                 return
             }
+        }
+
+        // Tools that are not on the host (cmake, clang, python3, node, …) run
+        // inside the Alpine environment automatically once it is installed.
+        val firstWord = cmd.split(Regex("\\s+")).first()
+        val onHost = toolchain.environment()["PATH"].orEmpty().split(":")
+            .any { dir -> dir.isNotBlank() && File(dir, firstWord).canExecute() }
+        if (!onHost && toolchain.alpineInstalled) {
+            runInAlpineFromTerminal(scope, cmd, cwd)
+            return
         }
 
         val shell = listOf("/system/bin/sh", "/bin/sh").firstOrNull { File(it).exists() } ?: "sh"
@@ -252,11 +271,40 @@ class AppState(context: Context) {
         }
     }
 
+    /** Runs [cmd] inside the Alpine environment with the projects dir visible. */
+    private fun runInAlpineFromTerminal(scope: CoroutineScope, cmd: String, cwd: File) {
+        if (!toolchain.alpineInstalled) {
+            terminalOutput.add(BuildLine("Alpine is not installed yet. Run: pkg install alpine", true))
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val binds = listOf(projectsDir)
+            val workDir = if (cwd.absolutePath.startsWith(projectsDir.absolutePath)) cwd else null
+            val code = toolchain.runInAlpine(cmd, workDir, binds) { line, isError ->
+                terminalOutput.add(BuildLine(line, isError))
+            }
+            if (code != 0) terminalOutput.add(BuildLine("(exit $code)", true))
+        }
+    }
+
+    /** Friendly names -> Alpine package names. */
+    private val pkgAliases = mapOf(
+        "python" to "python3",
+        "node" to "nodejs",
+        "nodejs" to "nodejs npm",
+        "gcc" to "build-base",
+        "g++" to "build-base",
+        "java" to "openjdk17",
+        "javac" to "openjdk17",
+    )
+
     /**
-     * Built-in package manager. `pkg install busybox` genuinely downloads and
-     * installs a real BusyBox into $PREFIX/bin (300+ Unix commands). Other
-     * packages require toolchains built specifically for this app's prefix -
-     * reported honestly instead of pretending.
+     * Built-in package manager.
+     *  - `pkg install busybox` installs BusyBox into $PREFIX/bin (300+ commands).
+     *  - `pkg install alpine` sets up the Alpine Linux environment (proot).
+     *  - `pkg install <anything else>` installs real Alpine packages — cmake,
+     *    clang, make, python3, nodejs, openjdk17, go, … — setting up Alpine
+     *    first automatically when needed.
      */
     private fun handlePkg(scope: CoroutineScope, cmd: String) {
         val parts = cmd.split(Regex("\\s+"))
@@ -274,19 +322,54 @@ class AppState(context: Context) {
                     }
                 }
             }
+            action == "install" && target == "alpine" -> {
+                scope.launch(Dispatchers.IO) {
+                    toolchain.installAlpine { line, isError ->
+                        terminalOutput.add(BuildLine(line, isError))
+                    }
+                }
+            }
+            action == "install" && target == "flutter" -> {
+                terminalOutput.add(BuildLine("Flutter does not ship an Android-hosted SDK yet, so it cannot run on-device.", true))
+                terminalOutput.add(BuildLine("You can still edit Flutter projects here and build them in the cloud.", false))
+            }
             action == "install" && target != null -> {
-                terminalOutput.add(BuildLine("'$target' is not available yet.", true))
-                terminalOutput.add(BuildLine("Available now: pkg install busybox  (ls, grep, vi, tar, wget, unzip + 300 more)", false))
-                terminalOutput.add(BuildLine("Compilers (clang, cmake, python, node) need packages built for this app's prefix - in development.", false))
+                val packages = parts.drop(2).joinToString(" ") { pkgAliases[it] ?: it }
+                scope.launch(Dispatchers.IO) {
+                    if (!toolchain.alpineInstalled) {
+                        terminalOutput.add(BuildLine("Setting up the Alpine Linux environment first (one-time, ~4 MB)…", false))
+                        val ok = toolchain.installAlpine { line, isError ->
+                            terminalOutput.add(BuildLine(line, isError))
+                        }
+                        if (!ok) return@launch
+                    }
+                    terminalOutput.add(BuildLine("apk add $packages", false))
+                    val code = toolchain.runInAlpine(
+                        "apk update >/dev/null 2>&1; apk add $packages",
+                        null, emptyList(),
+                    ) { line, isError -> terminalOutput.add(BuildLine(line, isError)) }
+                    terminalOutput.add(
+                        if (code == 0) BuildLine("Installed: $packages — just type the command to use it.", false)
+                        else BuildLine("apk failed (exit $code). Try: pkg search <name>", true)
+                    )
+                }
+            }
+            (action == "uninstall" || action == "remove") && target != null -> {
+                val packages = parts.drop(2).joinToString(" ") { pkgAliases[it] ?: it }
+                runInAlpineFromTerminal(scope, "apk del $packages", projectsDir)
+            }
+            action == "search" && target != null -> {
+                runInAlpineFromTerminal(scope, "apk update >/dev/null 2>&1; apk search ${parts.drop(2).joinToString(" ")}", projectsDir)
             }
             action == "list" -> {
                 val tools = toolchain.bin.listFiles()?.map { it.name }?.sorted() ?: emptyList()
                 if (tools.isEmpty()) terminalOutput.add(BuildLine("No packages installed. Try: pkg install busybox", false))
                 else terminalOutput.add(BuildLine(tools.joinToString("  "), false))
+                if (toolchain.alpineInstalled) runInAlpineFromTerminal(scope, "apk info", projectsDir)
             }
             else -> {
-                terminalOutput.add(BuildLine("usage: pkg install <name> | pkg list", false))
-                terminalOutput.add(BuildLine("available: busybox", false))
+                terminalOutput.add(BuildLine("usage: pkg install <name…> | pkg uninstall <name…> | pkg search <name> | pkg list", false))
+                terminalOutput.add(BuildLine("examples: pkg install busybox | pkg install cmake clang make | pkg install python3", false))
             }
         }
     }
