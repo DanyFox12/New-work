@@ -27,10 +27,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -58,8 +61,7 @@ import java.io.File
 fun NewProjectDialog(state: AppState, onDismiss: () -> Unit) {
     var selected by remember { mutableStateOf(Templates.all.first()) }
     var name by remember { mutableStateOf("MyApp") }
-    val defaultLocation = System.getProperty("user.home") + File.separator + "upxBuilderProjects"
-    var location by remember { mutableStateOf(defaultLocation) }
+    var location by remember { mutableStateOf(state.projectsDir.absolutePath) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -274,4 +276,87 @@ fun GuideDialog(state: AppState, onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(state.tr(StringKey.CLOSE)) } },
     )
+}
+
+/**
+ * A simple folder browser: navigate with taps (".." goes up), then Open makes
+ * the current folder the active project. Starts in the app's projects home,
+ * where projects created by upxBuilder live.
+ */
+@Composable
+fun OpenFolderDialog(state: AppState, onDismiss: () -> Unit) {
+    var current by remember { mutableStateOf(state.projectsDir) }
+    val children = remember(current) {
+        current.listFiles()
+            ?.filter { it.isDirectory && !it.name.startsWith(".") }
+            ?.sortedBy { it.name.lowercase() }
+            ?: emptyList()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(state.tr(StringKey.OPEN_FOLDER)) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = current.absolutePath,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                    val parent = current.parentFile
+                    if (parent != null && parent.canRead()) {
+                        item {
+                            FolderRow(name = "..", onClick = { current = parent })
+                        }
+                    }
+                    items(children) { dir ->
+                        FolderRow(name = dir.name, onClick = { current = dir })
+                    }
+                    if (children.isEmpty()) {
+                        item {
+                            Text(
+                                text = state.tr(StringKey.NO_RECENT),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                modifier = Modifier.padding(8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                state.openProject(current)
+                onDismiss()
+            }) { Text(state.tr(StringKey.OPEN)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(state.tr(StringKey.CANCEL)) }
+        },
+    )
+}
+
+@Composable
+private fun FolderRow(name: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Folder,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(name, style = MaterialTheme.typography.bodyMedium)
+    }
 }

@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Error
@@ -28,10 +30,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,9 +74,20 @@ fun BottomPanel(state: AppState, modifier: Modifier = Modifier) {
                 selected = state.bottomTab == BottomTab.PROBLEMS,
                 onClick = { state.selectBottomTab(BottomTab.PROBLEMS) },
             )
+            Spacer(Modifier.width(4.dp))
+            PanelTab(
+                label = state.tr(StringKey.TERMINAL),
+                selected = state.bottomTab == BottomTab.TERMINAL,
+                onClick = { state.selectBottomTab(BottomTab.TERMINAL) },
+            )
             Spacer(Modifier.weight(1f))
             if (state.bottomTab == BottomTab.CONSOLE) {
                 IconButton(onClick = { state.clearConsole() }) {
+                    Icon(Icons.Filled.ClearAll, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            if (state.bottomTab == BottomTab.TERMINAL) {
+                IconButton(onClick = { state.clearTerminal() }) {
                     Icon(Icons.Filled.ClearAll, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurface)
                 }
             }
@@ -70,6 +95,7 @@ fun BottomPanel(state: AppState, modifier: Modifier = Modifier) {
         when (state.bottomTab) {
             BottomTab.CONSOLE -> ConsoleList(state)
             BottomTab.PROBLEMS -> ProblemsList(state)
+            BottomTab.TERMINAL -> TerminalPanel(state)
         }
     }
 }
@@ -156,6 +182,105 @@ private fun ProblemsList(state: AppState) {
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TerminalPanel(state: AppState) {
+    val scope = rememberCoroutineScope()
+    var input by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.terminalOutput.size) {
+        if (state.terminalOutput.isNotEmpty()) {
+            listState.animateScrollToItem(state.terminalOutput.lastIndex)
+        }
+    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+        ) {
+            items(state.terminalOutput) { line ->
+                Text(
+                    text = line.text,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = if (line.isError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.5f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = (state.terminalCwd?.name ?: "~") + " $",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(8.dp))
+            BasicTextField(
+                value = input,
+                onValueChange = { typed ->
+                    // Enter submits the command (works for both hardware and IME enter).
+                    if (typed.endsWith("\n")) {
+                        val cmd = typed.trimEnd('\n')
+                        input = ""
+                        state.runTerminal(scope, cmd)
+                    } else {
+                        input = typed
+                    }
+                },
+                textStyle = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                singleLine = false,
+                maxLines = 1,
+                decorationBox = { inner ->
+                    Box {
+                        if (input.isEmpty()) {
+                            Text(
+                                text = state.tr(StringKey.TERMINAL_PLACEHOLDER),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                            )
+                        }
+                        inner()
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .onPreviewKeyEvent { event ->
+                        if (event.key == Key.Enter && event.type == KeyEventType.KeyDown) {
+                            val cmd = input
+                            input = ""
+                            state.runTerminal(scope, cmd)
+                            true
+                        } else false
+                    },
+            )
+            IconButton(onClick = {
+                val cmd = input
+                input = ""
+                state.runTerminal(scope, cmd)
+            }) {
+                Icon(
+                    Icons.Filled.Send,
+                    contentDescription = "Run",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }

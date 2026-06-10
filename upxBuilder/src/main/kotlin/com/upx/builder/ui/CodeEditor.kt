@@ -3,16 +3,14 @@ package com.upx.builder.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -23,10 +21,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -35,16 +34,18 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.upx.builder.editor.Language
 import com.upx.builder.editor.SyntaxHighlighter
 import com.upx.builder.theme.AppTheme
+import kotlin.math.roundToInt
 
 /**
- * A scrollable code editor with a line-number gutter, live syntax highlighting,
- * auto-indentation, auto-closing brackets, and a completion bar that suggests
- * language keywords and identifiers from the file as you type.
+ * A scrollable code editor with a line-number gutter that aligns 1:1 with the
+ * code, live syntax highlighting, auto-indentation, auto-closing brackets, and
+ * completion suggestions that float directly above the word being typed.
  */
 @Composable
 fun CodeEditor(
@@ -60,13 +61,18 @@ fun CodeEditor(
         value = TextFieldValue(text, TextRange(value.selection.start.coerceAtMost(text.length)))
     }
 
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
     val scroll = rememberScrollState()
     val lineCount = remember(value.text) { value.text.count { it == '\n' } + 1 }
+    // One shared style for the gutter and the code: identical font size AND
+    // line height guarantee the numbers line up with the code 100%.
     val mono = TextStyle(
         fontFamily = FontFamily.Monospace,
         fontSize = 14.sp,
         lineHeight = 20.sp,
     )
+    val gutterText = remember(lineCount) { (1..lineCount).joinToString("\n") }
 
     val highlight = remember(language, theme.id) {
         VisualTransformation { input ->
@@ -92,66 +98,71 @@ fun CodeEditor(
         onTextChange(v.text)
     }
 
-    Column(modifier = modifier) {
-        if (suggestions.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(theme.gutterBackground)
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                suggestions.forEach { s ->
-                    val isKeyword = s in language.keywords
-                    Text(
-                        text = s,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        color = if (isKeyword) theme.syntax.keyword else theme.syntax.plain,
+    Row(modifier = modifier.background(theme.editorBackground).verticalScroll(scroll)) {
+        // Line-number gutter: a single text block sharing the editor's metrics.
+        Text(
+            text = gutterText,
+            style = mono.copy(color = theme.lineNumber, textAlign = TextAlign.End),
+            modifier = Modifier
+                .background(theme.gutterBackground)
+                .width(48.dp)
+                .padding(top = 8.dp, end = 8.dp),
+        )
+
+        // Editing surface + floating suggestion popup anchored to the cursor.
+        Box(modifier = Modifier.fillMaxSize().padding(start = 8.dp, top = 8.dp)) {
+            BasicTextField(
+                value = value,
+                onValueChange = { new ->
+                    val assisted = applyEditorAssists(value, new)
+                    value = assisted
+                    onTextChange(assisted.text)
+                },
+                onTextLayout = { layoutResult = it },
+                textStyle = mono.copy(color = theme.syntax.plain),
+                cursorBrush = SolidColor(theme.accent),
+                visualTransformation = highlight,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            val layout = layoutResult
+            if (suggestions.isNotEmpty() && layout != null) {
+                val density = LocalDensity.current
+                val safeOffset = cursor.coerceIn(0, layout.layoutInput.text.length)
+                val cursorRect = runCatching { layout.getCursorRect(safeOffset) }.getOrNull()
+                if (cursorRect != null) {
+                    val barHeightPx = with(density) { 34.dp.toPx() }
+                    val gapPx = with(density) { 4.dp.toPx() }
+                    // Float just above the line; if there is no room, drop below it.
+                    val y = if (cursorRect.top - barHeightPx - gapPx >= 0) {
+                        cursorRect.top - barHeightPx - gapPx
+                    } else {
+                        cursorRect.bottom + gapPx
+                    }
+                    Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(theme.editorBackground)
-                            .clickable { accept(s) }
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
+                            .offset { IntOffset(cursorRect.left.roundToInt(), y.roundToInt()) }
+                            .widthIn(max = 280.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(theme.gutterBackground)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 4.dp, vertical = 3.dp),
+                    ) {
+                        suggestions.forEach { s ->
+                            val isKeyword = s in language.keywords
+                            Text(
+                                text = s,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp,
+                                color = if (isKeyword) theme.syntax.keyword else theme.syntax.plain,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { accept(s) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
                 }
-            }
-        }
-
-        Row(modifier = Modifier.weight(1f).fillMaxWidth().background(theme.editorBackground).verticalScroll(scroll)) {
-            // Line-number gutter
-            Column(
-                modifier = Modifier
-                    .background(theme.gutterBackground)
-                    .fillMaxHeight()
-                    .width(48.dp)
-                    .padding(top = 8.dp, end = 8.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                for (n in 1..lineCount) {
-                    Text(
-                        text = n.toString(),
-                        style = mono.copy(color = theme.lineNumber, textAlign = TextAlign.End),
-                    )
-                }
-            }
-
-            // Editing surface
-            Box(modifier = Modifier.fillMaxSize().padding(start = 8.dp, top = 8.dp)) {
-                BasicTextField(
-                    value = value,
-                    onValueChange = { new ->
-                        val assisted = applyEditorAssists(value, new)
-                        value = assisted
-                        onTextChange(assisted.text)
-                    },
-                    textStyle = mono.copy(color = theme.syntax.plain),
-                    cursorBrush = SolidColor(theme.accent),
-                    visualTransformation = highlight,
-                    modifier = Modifier.fillMaxSize(),
-                )
             }
         }
     }
@@ -181,7 +192,7 @@ private fun buildSuggestions(text: String, prefix: String, language: Language): 
         .distinct()
         .sorted()
         .toList()
-    return (fromKeywords + fromFile).take(8)
+    return (fromKeywords + fromFile).take(6)
 }
 
 /**

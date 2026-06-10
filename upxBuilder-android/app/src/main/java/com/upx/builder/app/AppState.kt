@@ -19,11 +19,12 @@ import com.upx.builder.project.Project
 import com.upx.builder.theme.AppTheme
 import com.upx.builder.theme.Themes
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 
 /** Which tab the bottom panel is showing. */
-enum class BottomTab { CONSOLE, PROBLEMS }
+enum class BottomTab { CONSOLE, PROBLEMS, TERMINAL }
 
 /**
  * Single source of truth for the running application: the active theme, UI
@@ -59,6 +60,12 @@ class AppState(context: Context) {
 
     /** Live problems found in the active file by the diagnostics engine. */
     val diagnostics = mutableStateListOf<Diagnostic>()
+
+    /** Output lines of the in-app terminal. */
+    val terminalOutput = mutableStateListOf<BuildLine>()
+
+    /** Terminal working directory; `cd` changes it between commands. */
+    var terminalCwd by mutableStateOf<File?>(null)
 
     var bottomTab by mutableStateOf(BottomTab.CONSOLE)
         private set
@@ -186,4 +193,50 @@ class AppState(context: Context) {
     }
 
     fun clearConsole() = consoleOutput.clear()
+
+    fun clearTerminal() = terminalOutput.clear()
+
+    /**
+     * Runs a shell command in the in-app terminal and streams its output.
+     * `cd` and `clear` are handled internally; everything else goes to the
+     * system shell (`/system/bin/sh` on Android).
+     */
+    fun runTerminal(scope: CoroutineScope, command: String) {
+        val cmd = command.trim()
+        if (cmd.isEmpty()) return
+        val cwd = terminalCwd ?: (project?.root ?: projectsDir).also { terminalCwd = it }
+        terminalOutput.add(BuildLine("${cwd.name} $ $cmd", false))
+
+        when {
+            cmd == "clear" -> { terminalOutput.clear(); return }
+            cmd == "cd" || cmd.startsWith("cd ") -> {
+                val arg = cmd.removePrefix("cd").trim()
+                val target = when {
+                    arg.isEmpty() -> project?.root ?: projectsDir
+                    arg.startsWith("/") -> File(arg)
+                    else -> File(cwd, arg)
+                }
+                if (target.isDirectory) terminalCwd = target.canonicalFile
+                else terminalOutput.add(BuildLine("cd: no such directory: $arg", true))
+                return
+            }
+        }
+
+        val shell = listOf("/system/bin/sh", "/bin/sh").firstOrNull { File(it).exists() } ?: "sh"
+        scope.launch(Dispatchers.IO) {
+            try {
+                val process = ProcessBuilder(shell, "-c", cmd)
+                    .directory(cwd)
+                    .redirectErrorStream(true)
+                    .start()
+                process.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { terminalOutput.add(BuildLine(it, false)) }
+                }
+                val code = process.waitFor()
+                if (code != 0) terminalOutput.add(BuildLine("(exit $code)", true))
+            } catch (e: Exception) {
+                terminalOutput.add(BuildLine("error: ${e.message}", true))
+            }
+        }
+    }
 }

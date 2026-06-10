@@ -1,6 +1,7 @@
 package com.upx.builder.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -22,6 +24,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -32,7 +35,7 @@ import com.upx.builder.editor.Language
 import com.upx.builder.i18n.StringKey
 import com.upx.builder.project.BuildAction
 
-private enum class ActiveDialog { NONE, NEW_PROJECT, THEME, LANGUAGE, GUIDE }
+private enum class ActiveDialog { NONE, NEW_PROJECT, OPEN_FOLDER, THEME, LANGUAGE, GUIDE }
 
 @Composable
 fun MainWindow(state: AppState) {
@@ -48,6 +51,7 @@ fun MainWindow(state: AppState) {
                 // Compact = phone-portrait-ish widths. The layout adapts so every
                 // option stays reachable without rotating the device.
                 val compact = maxWidth < 600.dp
+                val drawerWidth = maxWidth * 0.72f
                 val consoleHeight: Dp = if (maxHeight < 700.dp) 150.dp else 200.dp
 
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -56,7 +60,7 @@ fun MainWindow(state: AppState) {
                             state = state,
                             compact = compact,
                             onNewProject = { dialog = ActiveDialog.NEW_PROJECT },
-                            onOpenFolder = { /* hook for a native folder picker */ },
+                            onOpenFolder = { dialog = ActiveDialog.OPEN_FOLDER },
                             onBuild = { action -> state.runBuild(scope, action) },
                             onChooseTheme = { dialog = ActiveDialog.THEME },
                             onChooseLanguage = { dialog = ActiveDialog.LANGUAGE },
@@ -64,35 +68,22 @@ fun MainWindow(state: AppState) {
                         )
 
                         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                            // On compact screens an empty project panel would hide the
-                            // welcome screen, so it only appears once a project is open.
-                            val showPanel = state.projectPanelVisible && (!compact || state.project != null)
-                            if (showPanel) {
-                                if (compact) {
-                                    // On phones the project tree takes the whole content
-                                    // area and closes itself when a file is opened.
-                                    ProjectPanel(
-                                        state = state,
-                                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                                        onFileOpened = { state.hideProjectPanel() },
-                                    )
-                                } else {
-                                    ProjectPanel(state, modifier = Modifier.width(240.dp).fillMaxHeight())
-                                    Box(
-                                        Modifier.width(1.dp).fillMaxHeight()
-                                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
-                                    )
-                                }
+                            // Wide screens: the classic fixed side panel. On phones the
+                            // panel becomes a drawer overlay (below) so the code stays visible.
+                            if (!compact && state.projectPanelVisible) {
+                                ProjectPanel(state, modifier = Modifier.width(240.dp).fillMaxHeight())
+                                Box(
+                                    Modifier.width(1.dp).fillMaxHeight()
+                                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                                )
                             }
 
-                            if (!(compact && showPanel)) {
-                                Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                    EditorAndConsole(
-                                        state = state,
-                                        consoleHeight = consoleHeight,
-                                        onNewProject = { dialog = ActiveDialog.NEW_PROJECT },
-                                    )
-                                }
+                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                EditorAndConsole(
+                                    state = state,
+                                    consoleHeight = consoleHeight,
+                                    onNewProject = { dialog = ActiveDialog.NEW_PROJECT },
+                                )
                             }
                         }
 
@@ -100,8 +91,32 @@ fun MainWindow(state: AppState) {
                     }
                 }
 
+                // Phone drawer: covers ~72% of the width so the code stays visible
+                // behind it; tapping the dimmed code area closes it.
+                if (compact && state.projectPanelVisible && state.project != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = 48.dp, bottom = 26.dp),
+                    ) {
+                        ProjectPanel(
+                            state = state,
+                            modifier = Modifier.width(drawerWidth).fillMaxHeight(),
+                            onFileOpened = { state.hideProjectPanel() },
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .background(Color.Black.copy(alpha = 0.35f))
+                                .clickable { state.hideProjectPanel() },
+                        )
+                    }
+                }
+
                 when (dialog) {
                     ActiveDialog.NEW_PROJECT -> NewProjectDialog(state) { dialog = ActiveDialog.NONE }
+                    ActiveDialog.OPEN_FOLDER -> OpenFolderDialog(state) { dialog = ActiveDialog.NONE }
                     ActiveDialog.THEME -> ThemeDialog(state) { dialog = ActiveDialog.NONE }
                     ActiveDialog.LANGUAGE -> LanguageDialog(state) { dialog = ActiveDialog.NONE }
                     ActiveDialog.GUIDE -> GuideDialog(state) { dialog = ActiveDialog.NONE }
