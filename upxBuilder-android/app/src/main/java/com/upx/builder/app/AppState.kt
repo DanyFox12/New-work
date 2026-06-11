@@ -21,6 +21,7 @@ import com.upx.builder.theme.AppTheme
 import com.upx.builder.theme.Themes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -105,6 +106,11 @@ class AppState(context: Context) {
         private set
 
     private val buildRunner = BuildRunner(toolchain.environment())
+
+    /** App-level scope for terminal commands, installs and builds. Deliberately
+     *  NOT a UI composition scope: those cancel on recomposition (keyboard,
+     *  tab switch), which silently killed long installs mid-way. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     init {
         if (toolchain.alpineInstalled) {
@@ -210,7 +216,7 @@ class AppState(context: Context) {
         val language = activeFile?.let { Language.fromFileName(it.name) }
             ?: Language.fromFileName(proj.root.listFiles()?.firstOrNull()?.name ?: "")
         consoleOutput.add(BuildLine("${tr(StringKey.BUILD_STARTED)}: ${action.name} (${language.displayName})", false))
-        scope.launch {
+        appScope.launch {
             val code = buildRunner.run(proj, language, action) { line ->
                 consoleOutput.add(line)
             }
@@ -269,7 +275,7 @@ class AppState(context: Context) {
         }
 
         val shell = listOf("/system/bin/sh", "/bin/sh").firstOrNull { File(it).exists() } ?: "sh"
-        scope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.IO) {
             try {
                 val builder = ProcessBuilder(shell, "-c", cmd)
                     .directory(cwd)
@@ -280,7 +286,7 @@ class AppState(context: Context) {
                     lines.forEach { terminalOutput.add(BuildLine(it, false)) }
                 }
                 val code = process.waitFor()
-                if (code != 0) terminalOutput.add(BuildLine("(exit $code)", true))
+                if (code != 0) terminalOutput.add(BuildLine(exitLabel(code), true))
             } catch (e: Exception) {
                 terminalOutput.add(BuildLine("error: ${e.message}", true))
             }
@@ -293,7 +299,7 @@ class AppState(context: Context) {
      * then reports the resulting directory back on a marker line.
      */
     private fun runAlpineShell(scope: CoroutineScope, cmd: String) {
-        scope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.IO) {
             val marker = "__UPXCWD__"
             val script = buildString {
                 append("cd \"").append(alpineCwd).append("\" 2>/dev/null || cd /root\n")
@@ -307,7 +313,19 @@ class AppState(context: Context) {
                 if (line.startsWith(marker)) alpineCwd = line.removePrefix(marker)
                 else terminalOutput.add(BuildLine(line, isError))
             }
-            if (code != 0) terminalOutput.add(BuildLine("(exit $code)", true))
+            if (code != 0) terminalOutput.add(BuildLine(exitLabel(code), true))
+        }
+    }
+
+    /** Human-readable exit status; decodes signal deaths (e.g. 159 = SIGSYS). */
+    private fun exitLabel(code: Int): String {
+        if (code <= 128) return "(exit $code)"
+        val sig = code - 128
+        return when (sig) {
+            31 -> "(killed by SIGSYS - this device's security filter blocked the binary)"
+            9 -> "(killed by SIGKILL - out of memory or stopped by the system)"
+            11 -> "(crashed with SIGSEGV)"
+            else -> "(killed by signal $sig)"
         }
     }
 
@@ -317,13 +335,13 @@ class AppState(context: Context) {
             terminalOutput.add(BuildLine("Alpine is not installed yet. Run: pkg install alpine", true))
             return
         }
-        scope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.IO) {
             val binds = listOf(projectsDir)
             val workDir = if (cwd.absolutePath.startsWith(projectsDir.absolutePath)) cwd else null
             val code = toolchain.runInAlpine(cmd, workDir, binds) { line, isError ->
                 terminalOutput.add(BuildLine(line, isError))
             }
-            if (code != 0) terminalOutput.add(BuildLine("(exit $code)", true))
+            if (code != 0) terminalOutput.add(BuildLine(exitLabel(code), true))
         }
     }
 
@@ -356,14 +374,14 @@ class AppState(context: Context) {
                     terminalOutput.add(BuildLine("busybox is already installed in PREFIX/bin.", false))
                     return
                 }
-                scope.launch(Dispatchers.IO) {
+                appScope.launch(Dispatchers.IO) {
                     toolchain.installBusybox { line, isError ->
                         terminalOutput.add(BuildLine(line, isError))
                     }
                 }
             }
             action == "install" && target == "alpine" -> {
-                scope.launch(Dispatchers.IO) {
+                appScope.launch(Dispatchers.IO) {
                     toolchain.installAlpine { line, isError ->
                         terminalOutput.add(BuildLine(line, isError))
                     }
@@ -375,7 +393,7 @@ class AppState(context: Context) {
             }
             action == "install" && target != null -> {
                 val packages = parts.drop(2).joinToString(" ") { pkgAliases[it] ?: it }
-                scope.launch(Dispatchers.IO) {
+                appScope.launch(Dispatchers.IO) {
                     if (!toolchain.alpineInstalled) {
                         terminalOutput.add(BuildLine("Setting up the Alpine Linux environment first (one-time, ~4 MB)…", false))
                         val ok = toolchain.installAlpine { line, isError ->

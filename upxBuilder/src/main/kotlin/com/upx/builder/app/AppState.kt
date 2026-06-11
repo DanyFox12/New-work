@@ -19,6 +19,7 @@ import com.upx.builder.theme.AppTheme
 import com.upx.builder.theme.Themes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.prefs.Preferences
@@ -83,6 +84,10 @@ class AppState {
 
     var building by mutableStateOf(false)
         private set
+
+    /** App-level scope for terminal commands and builds: UI composition scopes
+     *  cancel on recomposition, which would silently kill long-running jobs. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val buildRunner = BuildRunner()
 
@@ -182,7 +187,7 @@ class AppState {
         val language = activeFile?.let { Language.fromFileName(it.name) }
             ?: Language.fromFileName(proj.root.listFiles()?.firstOrNull()?.name ?: "")
         consoleOutput.add(BuildLine("${tr(StringKey.BUILD_STARTED)}: ${action.name} (${language.displayName})", false))
-        scope.launch {
+        appScope.launch {
             val code = buildRunner.run(proj, language, action) { line ->
                 consoleOutput.add(line)
             }
@@ -230,7 +235,7 @@ class AppState {
         }
 
         val shell = listOf("/system/bin/sh", "/bin/sh").firstOrNull { File(it).exists() } ?: "sh"
-        scope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.IO) {
             try {
                 val process = ProcessBuilder(shell, "-c", cmd)
                     .directory(cwd)

@@ -198,18 +198,14 @@ class ToolchainManager(filesDir: File) {
 
     /**
      * Installs the Alpine environment: downloads proot + the Alpine mini root
-     * filesystem, unpacks it with busybox tar (installing busybox first if
-     * needed), configures DNS and apk repositories, then test-runs a shell
-     * inside it to confirm proot works on this device.
+     * filesystem, unpacks it with the built-in pure-Kotlin extractor (no
+     * downloaded binary needed), configures DNS and apk repositories, then
+     * test-runs a shell inside it to confirm proot works on this device.
      */
     suspend fun installAlpine(onLine: (String, Boolean) -> Unit): Boolean = withContext(Dispatchers.IO) {
         if (alpineInstalled) {
             onLine("Alpine Linux is already installed.", false)
             return@withContext true
-        }
-        if (!busyboxInstalled) {
-            onLine("Installing busybox first (needed to unpack Alpine)…", false)
-            if (!installBusybox(onLine)) return@withContext false
         }
 
         val purl = prootUrl()
@@ -240,21 +236,10 @@ class ToolchainManager(filesDir: File) {
 
         onLine("Unpacking Alpine Linux…", false)
         alpineRoot.mkdirs()
-        val tarExit = try {
-            val p = ProcessBuilder(
-                File(bin, "busybox").absolutePath, "tar", "-xzf",
-                tarball.absolutePath, "-C", alpineRoot.absolutePath,
-            ).redirectErrorStream(true).start()
-            p.inputStream.bufferedReader().readLines().takeLast(3).forEach { onLine(it, false) }
-            p.waitFor()
-        } catch (e: Exception) {
-            onLine("Unpack failed: ${e.message}", true)
-            -1
-        } finally {
-            tarball.delete()
-        }
-        if (tarExit != 0 || !File(alpineRoot, "etc/alpine-release").exists()) {
-            onLine("Alpine unpack failed (exit $tarExit).", true)
+        val unpacked = extractTarGz(tarball, alpineRoot, onLine)
+        tarball.delete()
+        if (!unpacked || !File(alpineRoot, "etc/alpine-release").exists()) {
+            onLine("Alpine unpack failed.", true)
             return@withContext false
         }
 
@@ -346,6 +331,136 @@ class ToolchainManager(filesDir: File) {
         // Avoids seccomp issues on several Android versions (Termux does the same).
         "PROOT_NO_SECCOMP" to "1",
     )
+
+    // ------------------------------------------------------------------
+    // Pure-Kotlin tar.gz extraction. Deliberately not delegated to any
+    // downloaded binary: some devices' seccomp filters kill foreign static
+    // binaries (SIGSYS), and the Alpine install must not depend on that.
+    // Handles dirs, files (with exec bits), symlinks, hard links (copied)
+    // and GNU long names — everything in the Alpine mini rootfs.
+    // ------------------------------------------------------------------
+
+    private fun extractTarGz(archive: File, dest: File, onLine: (String, Boolean) -> Unit): Boolean {
+        return try {
+            var entries = 0
+            java.util.zip.GZIPInputStream(archive.inputStream().buffered()).use { input ->
+                val block = ByteArray(512)
+                var longName: String? = null
+                while (readFully(input, block)) {
+                    if (block.all { it == 0.toByte() }) continue
+                    val type = block[156].toInt().toChar()
+                    val size = parseOctal(block, 124, 12)
+                    val rawName = longName ?: buildString {
+                        val prefix = parseName(block, 345, 155)
+                        if (prefix.isNotEmpty()) append(prefix).append('/')
+                        append(parseName(block, 0, 100))
+                    }
+                    longName = null
+                    // Never let an archive entry escape the destination dir.
+                    val safeName = rawName.trimStart('/')
+                    if (safeName.isEmpty() || safeName.split('/').contains("..")) {
+                        skipData(input, size)
+                        continue
+                    }
+                    val target = File(dest, safeName)
+                    when (type) {
+                        'L' -> longName = String(readData(input, size), Charsets.UTF_8).trimEnd('\u0000')
+                        '5' -> target.mkdirs()
+                        '2' -> {
+                            target.parentFile?.mkdirs()
+                            target.delete()
+                            runCatching { Os.symlink(parseName(block, 157, 100), target.absolutePath) }
+                        }
+                        '1' -> {
+                            skipData(input, size)
+                            target.parentFile?.mkdirs()
+                            val original = File(dest, parseName(block, 157, 100).trimStart('/'))
+                            runCatching { original.copyTo(target, overwrite = true) }
+                        }
+                        '0', '\u0000' -> {
+                            target.parentFile?.mkdirs()
+                            writeData(input, size, target)
+                            val mode = parseOctal(block, 100, 8)
+                            if (mode and 0b1001001L != 0L) target.setExecutable(true, false)
+                        }
+                        else -> skipData(input, size)
+                    }
+                    entries++
+                }
+            }
+            onLine("Extracted $entries entries.", false)
+            true
+        } catch (e: Exception) {
+            onLine("Extract failed: ${e.message}", true)
+            false
+        }
+    }
+
+    private fun readFully(input: java.io.InputStream, buf: ByteArray): Boolean {
+        var off = 0
+        while (off < buf.size) {
+            val n = input.read(buf, off, buf.size - off)
+            if (n < 0) return false
+            off += n
+        }
+        return true
+    }
+
+    private fun readData(input: java.io.InputStream, size: Long): ByteArray {
+        val data = ByteArray(size.toInt())
+        var off = 0
+        while (off < data.size) {
+            val n = input.read(data, off, data.size - off)
+            if (n < 0) throw java.io.EOFException("archive truncated")
+            off += n
+        }
+        skipBytes(input, padOf(size))
+        return data
+    }
+
+    private fun writeData(input: java.io.InputStream, size: Long, target: File) {
+        target.outputStream().use { out ->
+            var remaining = size
+            val buf = ByteArray(64 * 1024)
+            while (remaining > 0) {
+                val n = input.read(buf, 0, minOf(remaining, buf.size.toLong()).toInt())
+                if (n < 0) throw java.io.EOFException("archive truncated")
+                out.write(buf, 0, n)
+                remaining -= n
+            }
+        }
+        skipBytes(input, padOf(size))
+    }
+
+    private fun skipData(input: java.io.InputStream, size: Long) = skipBytes(input, size + padOf(size))
+
+    private fun skipBytes(input: java.io.InputStream, count: Long) {
+        var remaining = count
+        while (remaining > 0) {
+            val n = input.skip(remaining)
+            if (n > 0) { remaining -= n; continue }
+            if (input.read() < 0) throw java.io.EOFException("archive truncated")
+            remaining--
+        }
+    }
+
+    private fun padOf(size: Long): Long = (512 - size % 512) % 512
+
+    private fun parseName(block: ByteArray, offset: Int, length: Int): String {
+        var end = offset
+        while (end < offset + length && block[end] != 0.toByte()) end++
+        return String(block, offset, end - offset, Charsets.UTF_8)
+    }
+
+    private fun parseOctal(block: ByteArray, offset: Int, length: Int): Long {
+        var value = 0L
+        for (i in offset until offset + length) {
+            val c = block[i].toInt().toChar()
+            if (c in '0'..'7') value = value * 8 + (c - '0')
+            else if (value > 0) break
+        }
+        return value
+    }
 
     /** Downloads [url] to [dest], following redirects and checking the status. */
     private fun downloadTo(url: String, dest: File, onLine: (String, Boolean) -> Unit): Boolean {
