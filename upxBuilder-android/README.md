@@ -49,6 +49,12 @@ On first launch the app **offers to download the environment automatically**
 (Essentials ~6 MB, or Everything ~600 MB), so new users never need to know the
 commands.
 
+The terminal itself is styled like Termux — always dark, green prompt —
+whatever app theme is active. When built via the Colab notebook, **both the
+proot launcher and the Alpine base system are bundled inside the APK**
+(AndroidIDE bundles its Termux bootstrap the same way), so the environment
+sets up with zero network; otherwise the app downloads them on first install.
+
 **The proot launcher is verified, not assumed.** Some devices' seccomp filters
 kill generic Linux proot builds (the symptom is "killed by SIGSYS"). The app
 therefore tries, in order: the **Android-native proot** (built against bionic by

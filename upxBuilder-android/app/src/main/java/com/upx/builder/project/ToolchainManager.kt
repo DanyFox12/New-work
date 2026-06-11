@@ -366,15 +366,20 @@ class ToolchainManager(
         return if (tail.isEmpty()) why else "$why — $tail"
     }
 
-    private fun alpineUrls(): List<String> {
-        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return emptyList()
-        val arch = when {
+    /** Alpine's architecture name for this device. */
+    private fun alpineArch(): String? {
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return null
+        return when {
             abi.startsWith("arm64") -> "aarch64"
             abi.startsWith("armeabi") -> "armv7"
             abi.startsWith("x86_64") -> "x86_64"
             abi.startsWith("x86") -> "x86"
-            else -> return emptyList()
+            else -> null
         }
+    }
+
+    private fun alpineUrls(): List<String> {
+        val arch = alpineArch() ?: return emptyList()
         val release = "3.20.3"
         val path = "alpine/v3.20/releases/$arch/alpine-minirootfs-$release-$arch.tar.gz"
         return listOf(
@@ -382,6 +387,23 @@ class ToolchainManager(
             "https://uk.alpinelinux.org/$path",
             "https://mirror.leaseweb.com/$path",
         )
+    }
+
+    /** Copies the Alpine base system bundled in the APK's assets (when the APK
+     *  was built with it — see the Colab notebook), AndroidIDE-bootstrap-style,
+     *  so the whole environment installs with zero network. */
+    private fun copyAlpineFromAsset(dest: File, onLine: (String, Boolean) -> Unit): Boolean {
+        val assetManager = assets ?: return false
+        val arch = alpineArch() ?: return false
+        return try {
+            assetManager.open("alpine/alpine-minirootfs-$arch.tar.gz").use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            onLine("Using the Linux base system bundled in the app…", false)
+            true
+        } catch (_: Exception) {
+            false // not bundled in this APK build
+        }
     }
 
     /**
@@ -399,12 +421,15 @@ class ToolchainManager(
 
         if (!File(alpineRoot, "etc/alpine-release").exists()) {
             val tarball = File(tmp, "alpine-minirootfs.tar.gz")
-            var downloaded = false
-            for (url in alpineUrls()) {
-                if (downloadTo(url, tarball, onLine)) { downloaded = true; break }
-                onLine("Trying next mirror…", false)
+            // Prefer the copy bundled inside the APK; download only without one.
+            var obtained = copyAlpineFromAsset(tarball, onLine)
+            if (!obtained) {
+                for (url in alpineUrls()) {
+                    if (downloadTo(url, tarball, onLine)) { obtained = true; break }
+                    onLine("Trying next mirror…", false)
+                }
             }
-            if (!downloaded) {
+            if (!obtained) {
                 onLine("Could not download Alpine from any mirror. Check the connection and retry.", true)
                 return@withContext false
             }
@@ -535,13 +560,26 @@ class ToolchainManager(
         File(dir, name).writeText("#!/bin/sh\n$body\n")
     }
 
-    /** apk add helper that streams progress to [onLine]; returns true on success. */
+    /** apk add helper that streams progress to [onLine]; returns true on success.
+     *
+     *  Alpine's busybox post-install trigger dies under proot ("fchdir: Function
+     *  not implemented") even though the packages install fine. We do the
+     *  trigger's job ourselves — `busybox --install -s` relinks every applet —
+     *  and replace the scary-but-harmless ERROR lines with one clear note. */
     fun apkAdd(packages: String, onLine: (String, Boolean) -> Unit): Boolean {
         onLine("apk add $packages", false)
+        var triggerNoise = false
         val code = runInAlpine(
-            "apk update >/dev/null 2>&1; apk add --no-cache $packages",
-            null, emptyList(), onLine,
-        )
+            "apk update >/dev/null 2>&1; apk add --no-cache $packages; rc=\$?; " +
+                "/bin/busybox --install -s >/dev/null 2>&1 || true; exit \$rc",
+            null, emptyList(),
+        ) { line, isError ->
+            if (line.contains("busybox-") && line.contains(".trigger")) triggerNoise = true
+            else onLine(line, isError)
+        }
+        if (triggerNoise) {
+            onLine("(busybox trigger skipped — a harmless proot limitation; commands were relinked automatically)", false)
+        }
         return code == 0
     }
 

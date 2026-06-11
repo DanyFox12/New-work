@@ -198,6 +198,14 @@ private fun ProblemsList(state: AppState) {
     }
 }
 
+// Termux-style palette: a real terminal is always dark, whatever the app theme.
+private val TermBackground = Color(0xFF0B0F14)
+private val TermInputBar = Color(0xFF151B22)
+private val TermText = Color(0xFFE6EDF3)
+private val TermError = Color(0xFFFF6B6B)
+private val TermGreen = Color(0xFF3DDC84)
+private val TermDim = Color(0xFF7D8590)
+
 @Composable
 private fun TerminalPanel(state: AppState) {
     val scope = rememberCoroutineScope()
@@ -208,33 +216,33 @@ private fun TerminalPanel(state: AppState) {
             listState.animateScrollToItem(state.terminalOutput.lastIndex)
         }
     }
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().background(TermBackground)) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp),
         ) {
             items(state.terminalOutput) { line ->
                 Text(
                     text = line.text,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
-                    color = if (line.isError) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                    lineHeight = 16.sp,
+                    color = if (line.isError) TermError else TermText,
                 )
             }
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.5f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .background(TermInputBar)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = state.terminalPrompt + " $",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.primary,
+                color = TermGreen,
             )
             Spacer(Modifier.width(8.dp))
             BasicTextField(
@@ -252,9 +260,9 @@ private fun TerminalPanel(state: AppState) {
                 textStyle = TextStyle(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = TermText,
                 ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                cursorBrush = SolidColor(TermGreen),
                 singleLine = false,
                 maxLines = 1,
                 decorationBox = { inner ->
@@ -264,7 +272,7 @@ private fun TerminalPanel(state: AppState) {
                                 text = state.tr(StringKey.TERMINAL_PLACEHOLDER),
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                color = TermDim,
                             )
                         }
                         inner()
@@ -289,7 +297,7 @@ private fun TerminalPanel(state: AppState) {
                 Icon(
                     Icons.Filled.Send,
                     contentDescription = "Run",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = TermGreen,
                     modifier = Modifier.size(18.dp),
                 )
             }
