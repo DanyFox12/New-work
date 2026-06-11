@@ -113,6 +113,26 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew installDebug       # installs onto a connected device/emulator
 ```
 
+### Release build (R8 + obfuscation)
+
+`assembleRelease` produces an R8-shrunk, obfuscated APK
+(`minifyEnabled` + `shrinkResources` + `proguard-rules.pro`). Provide your
+keystore via environment variables so secrets never enter the repo — without
+them the build falls back to the debug key (still fully R8-processed):
+
+```bash
+export UPX_KEYSTORE=/path/to/release.jks
+export UPX_KEYSTORE_PASSWORD=…
+export UPX_KEY_ALIAS=…
+export UPX_KEY_PASSWORD=…
+./gradlew assembleRelease    # app/build/outputs/apk/release/app-release.apk
+```
+
+Always sign updates with the **same keystore** — Android refuses to install an
+APK whose signature differs from the version already on the device. The Colab
+notebook (`../build_on_colab.ipynb`) automates this by keeping the keystore in
+your Google Drive.
+
 > Note: this APK could not be compiled in the cloud environment it was authored
 > in (no Android SDK there, and Google's Maven was network-blocked). The project
 > is structured to build with a standard Android Studio / SDK setup.
