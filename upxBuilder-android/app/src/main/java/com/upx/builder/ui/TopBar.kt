@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Language
@@ -59,6 +60,7 @@ fun TopBar(
     onChooseTheme: () -> Unit,
     onChooseLanguage: () -> Unit,
     onGuide: () -> Unit,
+    onSetup: () -> Unit,
 ) {
     val hasProject = state.project != null
     Row(
@@ -104,6 +106,7 @@ fun TopBar(
                     OverflowItem(Icons.Filled.Terminal, state.tr(StringKey.TOGGLE_CONSOLE)) { menuOpen = false; state.toggleConsole() }
                     OverflowItem(Icons.Filled.Palette, state.tr(StringKey.THEME)) { menuOpen = false; onChooseTheme() }
                     OverflowItem(Icons.Filled.Language, state.tr(StringKey.LANGUAGE)) { menuOpen = false; onChooseLanguage() }
+                    OverflowItem(Icons.Filled.Download, state.tr(StringKey.SETUP)) { menuOpen = false; onSetup() }
                     OverflowItem(Icons.Filled.Help, state.tr(StringKey.DOCUMENTATION)) { menuOpen = false; onGuide() }
                 }
             }
@@ -113,6 +116,7 @@ fun TopBar(
             BarButton(Icons.Filled.Terminal, state.tr(StringKey.TOGGLE_CONSOLE), { state.toggleConsole() })
             BarButton(Icons.Filled.Palette, state.tr(StringKey.THEME), onChooseTheme)
             BarButton(Icons.Filled.Language, state.tr(StringKey.LANGUAGE), onChooseLanguage)
+            BarButton(Icons.Filled.Download, state.tr(StringKey.SETUP), onSetup)
             BarButton(Icons.Filled.Help, state.tr(StringKey.DOCUMENTATION), onGuide)
         }
     }

@@ -28,19 +28,57 @@ templates and the in-app coding guides.
 
 ## The terminal and on-device tools
 
-upxBuilder has a **real terminal** (TERMINAL tab) that runs commands through the
-device shell with a Termux-style `$PREFIX` environment (`project/ToolchainManager.kt`).
-`pkg install busybox` genuinely downloads a static BusyBox for the device CPU
-into `$PREFIX/bin`, executes it, and links 300+ real Unix commands (ls, grep,
-vi, tar, wget, unzip, …). The app deliberately targets **SDK 28** because Android
-only allows executing app-private binaries at that level — the same technique
-Termux and AndroidIDE use (fine for sideloading; not allowed on the Play Store).
+upxBuilder has a **real terminal** (TERMINAL tab) and a built-in package manager,
+`pkg`, modelled on Termux's (`project/ToolchainManager.kt`, `project/Toolchains.kt`).
+The app deliberately targets **SDK 28** because Android only allows executing
+app-private binaries at that level — the same technique Termux and AndroidIDE
+use (fine for sideloading; not allowed on the Play Store).
 
-Full compilers (clang, cmake, python, node) require packages built specifically
-for this app's prefix path — AndroidIDE maintains an entire build infrastructure
-for exactly this. With `$PREFIX`, the env plumbing, and `pkg` in place, adding
-them is now a packaging task; until then `pkg` reports honestly what is and
-isn't available, and Build/Run find any tool installed into the prefix.
+Two layers provide the tools:
+
+1. **BusyBox** — `pkg install busybox` downloads a static BusyBox for the device
+   CPU into `$PREFIX/bin`, runs it, and links 300+ real Unix commands (ls, grep,
+   vi, tar, wget, unzip, …). Works even before the Linux environment is set up.
+2. **A full Linux userland** — `pkg install alpine` unpacks a tiny Alpine Linux
+   root filesystem and runs it under **proot** (no root needed). Its package
+   manager, `apk`, then installs thousands of **arch-native** packages that run
+   directly on the device's CPU. The terminal becomes an Alpine shell, with `cd`
+   persisting between commands, exactly like Termux.
+
+### Installing toolchains (SDK, JDK, platform-tools, CMake, Python, Flutter…)
+
+Tap **Setup** (the download icon in the toolbar, or the button on the welcome
+screen) for a one-tap installer, or type the commands in the terminal. The first
+install also sets up the Linux environment automatically.
+
+| Tool | Command | What you get |
+| --- | --- | --- |
+| Linux env | `pkg install alpine` | the full userland everything runs in |
+| C/C++ | `pkg install gcc` / `pkg install clang` | gcc, g++, make / clang, lld |
+| CMake | `pkg install cmake` | cmake, ctest, make |
+| Python | `pkg install python` | python3, pip3 |
+| Java JDK | `pkg install java` | javac, java, jar, keytool (OpenJDK 17) |
+| Node.js | `pkg install node` | node, npm, npx |
+| Go | `pkg install go` | go, gofmt |
+| Gradle | `pkg install gradle` | gradle (Kotlin/Java builds) |
+| Git | `pkg install git` | git |
+| Android SDK | `pkg install sdk` | sdkmanager + command-line tools |
+| adb/fastboot | `pkg install platform-tools` | arch-native adb & fastboot |
+| Flutter | `pkg install flutter` | flutter + Dart SDK |
+| The lot | `pkg install all` | the common native dev set in one go |
+
+`pkg help`, `pkg search <name>`, `pkg list` and `pkg uninstall <name>` work too,
+and any unknown name falls through to `apk add`, so the entire Alpine repository
+is available. Installed tools persist on the PATH (via `/etc/profile.d`), so the
+**Build/Run** buttons and later terminal commands find them automatically.
+
+**Honest limits.** `sdkmanager`, `dart`, the compilers, Python, Node, Go and adb
+are arch-native and run on the device. A full `flutter build apk` / Android APK
+build additionally needs arm-native `aapt2`/`d8` build-tools — Google ships those
+only for x86_64 — so on-device APK assembly still depends on an arm-built
+build-tools set (the problem AndroidIDE solves with its own tooling). Everything
+short of that — editing, analysis, compiling and running Dart/C++/Java/Python/
+Node/Go — works on the phone.
 
 ## Requirements
 
@@ -70,7 +108,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 - Kotlin **1.9.24**, Android Gradle Plugin **8.5.2**, Gradle **8.7**, NDK **26.1** + CMake **3.22** (for the C++ analyzer)
 - Jetpack Compose via **Compose BOM 2024.06.00** (Compose compiler ext **1.5.14**)
 - Material 3, `material-icons-extended`
-- `compileSdk` 34, `minSdk` 24, `targetSdk` 34
+- `compileSdk` 34, `minSdk` 24, `targetSdk` **28** (load-bearing: see the terminal section)
 
 ## Project structure
 

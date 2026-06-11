@@ -37,7 +37,9 @@ enum class StringKey {
     NO_FILE_OPEN, READY, LINE, COLUMN,
     CHOOSE_THEME, CHOOSE_LANGUAGE, CLOSE,
     GUIDE_TITLE, BUILD_STARTED, BUILD_FINISHED, BUILD_FAILED, TOOL_NOT_FOUND,
-    INSTRUCTIONS
+    INSTRUCTIONS,
+    SETUP, SETUP_TITLE, SETUP_INTRO, INSTALL, INSTALL_CORE, PROVIDES, ALREADY_INSTALLED,
+    CAT_CORE, CAT_LANGUAGE, CAT_BUILD, CAT_ANDROID, CAT_UTIL
 }
 
 object Strings {
@@ -106,6 +108,18 @@ object Strings {
         StringKey.BUILD_FAILED to "Build failed",
         StringKey.TOOL_NOT_FOUND to "Toolchain not found on this machine",
         StringKey.INSTRUCTIONS to "Instructions",
+        StringKey.SETUP to "Setup",
+        StringKey.SETUP_TITLE to "Install developer tools",
+        StringKey.SETUP_INTRO to "upxBuilder runs a real Linux environment on your device (like Termux). Tap Install to add a toolchain, or type the command in the Terminal. The first install also sets up the Linux environment automatically.",
+        StringKey.INSTALL to "Install",
+        StringKey.INSTALL_CORE to "Install core dev set",
+        StringKey.PROVIDES to "Provides",
+        StringKey.ALREADY_INSTALLED to "Installed",
+        StringKey.CAT_CORE to "Core environment",
+        StringKey.CAT_LANGUAGE to "Languages & runtimes",
+        StringKey.CAT_BUILD to "Build tools",
+        StringKey.CAT_ANDROID to "Android & mobile",
+        StringKey.CAT_UTIL to "Utilities",
     )
 
     private val ar = mapOf(
@@ -173,6 +187,18 @@ object Strings {
         StringKey.BUILD_FAILED to "فشل البناء",
         StringKey.TOOL_NOT_FOUND to "لم يتم العثور على الأدوات على هذا الجهاز",
         StringKey.INSTRUCTIONS to "التعليمات",
+        StringKey.SETUP to "الإعداد",
+        StringKey.SETUP_TITLE to "تثبيت أدوات المطورين",
+        StringKey.SETUP_INTRO to "يشغّل upxBuilder بيئة Linux حقيقية على جهازك (مثل Termux). اضغط تثبيت لإضافة أداة، أو اكتب الأمر في الطرفية. التثبيت الأول يعدّ بيئة Linux تلقائيًا.",
+        StringKey.INSTALL to "تثبيت",
+        StringKey.INSTALL_CORE to "تثبيت مجموعة الأدوات الأساسية",
+        StringKey.PROVIDES to "يوفّر",
+        StringKey.ALREADY_INSTALLED to "مُثبّت",
+        StringKey.CAT_CORE to "البيئة الأساسية",
+        StringKey.CAT_LANGUAGE to "اللغات والبيئات",
+        StringKey.CAT_BUILD to "أدوات البناء",
+        StringKey.CAT_ANDROID to "أندرويد والهاتف",
+        StringKey.CAT_UTIL to "أدوات مساعدة",
     )
 
     private val zh = mapOf(
@@ -240,6 +266,18 @@ object Strings {
         StringKey.BUILD_FAILED to "构建失败",
         StringKey.TOOL_NOT_FOUND to "在此机器上未找到工具链",
         StringKey.INSTRUCTIONS to "说明",
+        StringKey.SETUP to "环境配置",
+        StringKey.SETUP_TITLE to "安装开发工具",
+        StringKey.SETUP_INTRO to "upxBuilder 在您的设备上运行真正的 Linux 环境（类似 Termux）。点击“安装”以添加工具链，或在终端中输入命令。首次安装会自动配置 Linux 环境。",
+        StringKey.INSTALL to "安装",
+        StringKey.INSTALL_CORE to "安装核心开发套件",
+        StringKey.PROVIDES to "提供",
+        StringKey.ALREADY_INSTALLED to "已安装",
+        StringKey.CAT_CORE to "核心环境",
+        StringKey.CAT_LANGUAGE to "语言与运行时",
+        StringKey.CAT_BUILD to "构建工具",
+        StringKey.CAT_ANDROID to "安卓与移动",
+        StringKey.CAT_UTIL to "实用工具",
     )
 
     private val it = mapOf(
@@ -307,6 +345,18 @@ object Strings {
         StringKey.BUILD_FAILED to "Compilazione fallita",
         StringKey.TOOL_NOT_FOUND to "Toolchain non trovata su questa macchina",
         StringKey.INSTRUCTIONS to "Istruzioni",
+        StringKey.SETUP to "Setup",
+        StringKey.SETUP_TITLE to "Installa strumenti di sviluppo",
+        StringKey.SETUP_INTRO to "upxBuilder esegue un vero ambiente Linux sul dispositivo (come Termux). Tocca Installa per aggiungere una toolchain, o digita il comando nel Terminale. La prima installazione configura automaticamente l'ambiente Linux.",
+        StringKey.INSTALL to "Installa",
+        StringKey.INSTALL_CORE to "Installa set di sviluppo base",
+        StringKey.PROVIDES to "Fornisce",
+        StringKey.ALREADY_INSTALLED to "Installato",
+        StringKey.CAT_CORE to "Ambiente di base",
+        StringKey.CAT_LANGUAGE to "Linguaggi e runtime",
+        StringKey.CAT_BUILD to "Strumenti di build",
+        StringKey.CAT_ANDROID to "Android e mobile",
+        StringKey.CAT_UTIL to "Utilità",
     )
 
     private val tables: Map<AppLanguage, Map<StringKey, String>> = mapOf(

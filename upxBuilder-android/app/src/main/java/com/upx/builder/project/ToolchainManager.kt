@@ -316,11 +316,17 @@ class ToolchainManager(filesDir: File) {
         argv += listOf("-0", "-b", "/dev", "-b", "/proc", "-b", "/sys")
         binds.forEach { argv += listOf("-b", it.absolutePath) }
         argv += listOf("-w", workDir?.absolutePath ?: "/root")
+        // Source any tool environment we installed (Android SDK, Flutter, Gradle
+        // drop a script in /etc/profile.d) so freshly installed tools stay on the
+        // PATH in every later command and build — without it the user would have
+        // to re-export PATH each time.
+        val sourced =
+            "for f in /etc/profile.d/*.sh; do [ -r \"\$f\" ] && . \"\$f\"; done 2>/dev/null; $command"
         argv += listOf(
             "/usr/bin/env", "-i",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "HOME=/root", "TERM=dumb", "LANG=C.UTF-8",
-            "/bin/sh", "-c", command,
+            "/bin/sh", "-c", sourced,
         )
         return argv
     }
@@ -331,6 +337,165 @@ class ToolchainManager(filesDir: File) {
         // Avoids seccomp issues on several Android versions (Termux does the same).
         "PROOT_NO_SECCOMP" to "1",
     )
+
+    // ------------------------------------------------------------------
+    // Named toolchain installers. apk packages are arch-native and handled
+    // generically by the caller; these cover the headline tools the user asked
+    // for that are NOT a single apk package: the Android SDK command-line tools,
+    // the Flutter SDK and Gradle. Each persists its PATH via /etc/profile.d so it
+    // stays available in every later terminal command and build.
+    // ------------------------------------------------------------------
+
+    /** True once the Android command-line tools (sdkmanager) are present. */
+    val androidSdkInstalled: Boolean
+        get() = File(alpineRoot, "root/android-sdk/cmdline-tools/latest/bin/sdkmanager").exists()
+
+    /** True once a Flutter checkout exists. */
+    val flutterInstalled: Boolean
+        get() = File(alpineRoot, "root/flutter/bin/flutter").exists()
+
+    /** True once a Gradle distribution is unpacked. */
+    val gradleInstalled: Boolean
+        get() = File(alpineRoot, "opt/gradle/bin/gradle").exists()
+
+    /** Writes a tiny env script that every later Alpine command sources. */
+    private fun writeProfileScript(name: String, body: String) {
+        val dir = File(alpineRoot, "etc/profile.d").apply { mkdirs() }
+        File(dir, name).writeText("#!/bin/sh\n$body\n")
+    }
+
+    /** apk add helper that streams progress to [onLine]; returns true on success. */
+    fun apkAdd(packages: String, onLine: (String, Boolean) -> Unit): Boolean {
+        onLine("apk add $packages", false)
+        val code = runInAlpine(
+            "apk update >/dev/null 2>&1; apk add --no-cache $packages",
+            null, emptyList(), onLine,
+        )
+        return code == 0
+    }
+
+    /**
+     * Installs Google's Android command-line tools (sdkmanager). These are Java,
+     * so they run on any CPU once OpenJDK is present. We unpack them into the
+     * standard `cmdline-tools/latest` layout, accept the SDK licences, then make
+     * sdkmanager/adb reachable on the PATH.
+     */
+    suspend fun installAndroidSdk(onLine: (String, Boolean) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        if (!alpineInstalled) { onLine("Install the Linux environment first: pkg install alpine", true); return@withContext false }
+        onLine("Installing Java + tools needed by the Android SDK manager…", false)
+        if (!apkAdd("openjdk17 unzip curl", onLine)) return@withContext false
+
+        writeProfileScript(
+            "upx-android.sh",
+            "export ANDROID_HOME=/root/android-sdk\n" +
+                "export ANDROID_SDK_ROOT=\$ANDROID_HOME\n" +
+                "export PATH=\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH",
+        )
+
+        val script = """
+            set -e
+            export ANDROID_HOME=/root/android-sdk
+            mkdir -p "${'$'}ANDROID_HOME/cmdline-tools"
+            cd /tmp
+            URL=https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            echo "Downloading Android command-line tools (~120 MB)…"
+            curl -L --fail -o cmdtools.zip "${'$'}URL"
+            rm -rf "${'$'}ANDROID_HOME/cmdline-tools/latest"
+            unzip -q cmdtools.zip -d "${'$'}ANDROID_HOME/cmdline-tools"
+            mv "${'$'}ANDROID_HOME/cmdline-tools/cmdline-tools" "${'$'}ANDROID_HOME/cmdline-tools/latest"
+            rm -f cmdtools.zip
+            echo "Accepting SDK licences…"
+            yes | "${'$'}ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+            "${'$'}ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
+        """.trimIndent()
+
+        val code = runInAlpine(script, null, emptyList(), onLine)
+        if (code == 0 && androidSdkInstalled) {
+            onLine("Android SDK manager ready. Install components with:", false)
+            onLine("  sdkmanager \"platform-tools\" \"platforms;android-34\" \"build-tools;34.0.0\"", false)
+            onLine("Tip: install on-device adb/fastboot with: pkg install platform-tools", false)
+            true
+        } else {
+            onLine("Android SDK setup failed (exit $code). Check the connection and retry.", true)
+            false
+        }
+    }
+
+    /**
+     * Clones the Flutter SDK (which bundles Dart) from GitHub. `gcompat` lets the
+     * glibc-built Dart binaries run on Alpine's musl libc. Editing, analysis and
+     * `dart` work on-device; we surface `flutter --version` to confirm.
+     */
+    suspend fun installFlutter(onLine: (String, Boolean) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        if (!alpineInstalled) { onLine("Install the Linux environment first: pkg install alpine", true); return@withContext false }
+        onLine("Installing Flutter prerequisites (git, bash, gcompat…)…", false)
+        if (!apkAdd("git curl unzip bash gcompat which", onLine)) return@withContext false
+
+        writeProfileScript(
+            "upx-flutter.sh",
+            "export PATH=/root/flutter/bin:/root/flutter/bin/cache/dart-sdk/bin:\$PATH\n" +
+                "export PUB_CACHE=/root/.pub-cache",
+        )
+
+        val script = """
+            set -e
+            cd /root
+            export PATH=/root/flutter/bin:${'$'}PATH
+            if [ ! -d flutter/.git ]; then
+                echo "Cloning Flutter (stable) — this is large (~1 GB), please wait…"
+                git config --global --add safe.directory /root/flutter || true
+                git clone --depth 1 -b stable https://github.com/flutter/flutter.git
+            else
+                echo "Flutter already cloned; updating…"
+                git -C flutter pull --ff-only || true
+            fi
+            git config --global --add safe.directory /root/flutter || true
+            flutter --version || true
+        """.trimIndent()
+
+        val code = runInAlpine(script, null, emptyList(), onLine)
+        if (flutterInstalled) {
+            onLine("Flutter SDK installed. Try: flutter --version  •  dart --version", false)
+            onLine("In a project run: flutter pub get   then   flutter run", false)
+            true
+        } else {
+            onLine("Flutter clone did not complete (exit $code). Retry: pkg install flutter", true)
+            false
+        }
+    }
+
+    /** Downloads the official Gradle binary distribution and puts it on the PATH. */
+    suspend fun installGradle(onLine: (String, Boolean) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        if (!alpineInstalled) { onLine("Install the Linux environment first: pkg install alpine", true); return@withContext false }
+        onLine("Installing Java (required by Gradle)…", false)
+        if (!apkAdd("openjdk17 unzip curl", onLine)) return@withContext false
+
+        writeProfileScript("upx-gradle.sh", "export PATH=/opt/gradle/bin:\$PATH")
+
+        val ver = "8.7"
+        val script = """
+            set -e
+            cd /tmp
+            echo "Downloading Gradle $ver…"
+            curl -L --fail -o gradle.zip "https://services.gradle.org/distributions/gradle-$ver-bin.zip"
+            rm -rf /opt/gradle
+            mkdir -p /opt
+            unzip -q gradle.zip -d /opt
+            mv "/opt/gradle-$ver" /opt/gradle
+            rm -f gradle.zip
+            export PATH=/opt/gradle/bin:${'$'}PATH
+            gradle --version
+        """.trimIndent()
+
+        val code = runInAlpine(script, null, emptyList(), onLine)
+        if (gradleInstalled) {
+            onLine("Gradle ready — build Kotlin/Java projects with: gradle build", false)
+            true
+        } else {
+            onLine("Gradle install failed (exit $code).", true)
+            false
+        }
+    }
 
     // ------------------------------------------------------------------
     // Pure-Kotlin tar.gz extraction. Deliberately not delegated to any

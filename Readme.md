@@ -16,6 +16,27 @@ It is written in **Kotlin** and comes in two editions that share the same core
 
 See each folder's `README.md` for details, screenshots and how to run it.
 
+## Develop on the device itself (Android edition)
+
+The Android edition is a full mobile IDE *and* a Termux-style development
+environment. It ships a **real terminal** and a built-in `pkg` package manager,
+plus a one-tap **Setup** screen, so you can install a complete toolchain on the
+phone and build right there:
+
+```text
+pkg install alpine            # one-time: the full Linux environment (proot)
+pkg install python java cmake clang   # native compilers & runtimes
+pkg install sdk               # Android command-line tools (sdkmanager)
+pkg install platform-tools    # adb & fastboot, built for your device's CPU
+pkg install flutter           # Flutter + Dart SDK
+pkg install all               # the common native dev set in one go
+pkg help                      # full command reference
+```
+
+Installed tools stay on the PATH, so the **Build** and **Run** buttons use them
+automatically. Full details, the complete tool table and the honest limits of
+on-device APK builds are in [`upxBuilder-android/README.md`](upxBuilder-android/README.md#the-terminal-and-on-device-tools).
+
 ## Quick start
 
 Desktop:

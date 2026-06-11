@@ -14,9 +14,11 @@ import com.upx.builder.i18n.Strings
 import com.upx.builder.project.BuildAction
 import com.upx.builder.project.BuildLine
 import com.upx.builder.project.BuildRunner
+import com.upx.builder.project.InstallMethod
 import com.upx.builder.project.OpenFile
 import com.upx.builder.project.Project
 import com.upx.builder.project.ToolchainManager
+import com.upx.builder.project.Toolchains
 import com.upx.builder.theme.AppTheme
 import com.upx.builder.theme.Themes
 import kotlinx.coroutines.CoroutineScope
@@ -114,9 +116,11 @@ class AppState(context: Context) {
 
     init {
         if (toolchain.alpineInstalled) {
-            terminalOutput.add(BuildLine("Alpine Linux ready — every Linux command works. Add tools with: pkg install <name>", false))
+            terminalOutput.add(BuildLine("Linux environment ready. Add tools with: pkg install python java cmake flutter sdk …", false))
+            terminalOutput.add(BuildLine("Tip: open Setup (toolbar) for one-tap installs, or run 'pkg help'.", false))
         } else {
-            terminalOutput.add(BuildLine("Welcome! Run 'pkg install alpine' once to unlock the full Linux environment (every command, like Termux).", false))
+            terminalOutput.add(BuildLine("Welcome! Tap Setup in the toolbar, or run 'pkg install alpine' to unlock the full Linux environment (like Termux).", false))
+            terminalOutput.add(BuildLine("Then: pkg install all  •  pkg install flutter  •  pkg install sdk  •  pkg help", false))
         }
     }
 
@@ -217,8 +221,13 @@ class AppState(context: Context) {
             ?: Language.fromFileName(proj.root.listFiles()?.firstOrNull()?.name ?: "")
         consoleOutput.add(BuildLine("${tr(StringKey.BUILD_STARTED)}: ${action.name} (${language.displayName})", false))
         appScope.launch {
-            val code = buildRunner.run(proj, language, action) { line ->
-                consoleOutput.add(line)
+            // Once the Linux environment exists, the real compilers (flutter,
+            // cmake, javac, gradle…) live inside it — so run the build there.
+            // Before that, fall back to the host shell + $PREFIX tools.
+            val code = if (toolchain.alpineInstalled) {
+                runBuildInAlpine(proj, language, action) { line -> consoleOutput.add(line) }
+            } else {
+                buildRunner.run(proj, language, action) { line -> consoleOutput.add(line) }
             }
             consoleOutput.add(
                 if (code == 0) BuildLine(tr(StringKey.BUILD_FINISHED), false)
@@ -227,6 +236,41 @@ class AppState(context: Context) {
             building = false
         }
     }
+
+    /**
+     * Runs the project's build/run/clean command inside the Alpine environment.
+     * The projects dir is bound at its real path, so the project root resolves to
+     * the same absolute path inside Alpine and the build's outputs land back in
+     * the user's project. Installed tools (flutter, cmake, gradle, the Android
+     * SDK…) are on the PATH because [ToolchainManager] sources /etc/profile.d.
+     */
+    private suspend fun runBuildInAlpine(
+        proj: Project,
+        language: Language,
+        action: BuildAction,
+        onLine: (BuildLine) -> Unit,
+    ): Int {
+        val command = buildRunner.commandFor(language, action, proj)
+        if (command == null) {
+            onLine(BuildLine("No ${action.name.lowercase()} command defined for ${language.displayName}.", true))
+            return -1
+        }
+        val shellCmd = command.joinToString(" ") { shellQuote(it) }
+        onLine(BuildLine("\$ $shellCmd", false))
+        val tool = command.first()
+        val check = "command -v ${shellQuote(tool)} >/dev/null 2>&1 || " +
+            "{ echo \"'$tool' is not installed. Open Setup or run: pkg install $tool\"; exit 127; }\n"
+        // Bind the project itself (so it is visible at its real path even if it
+        // lives outside the default projects home) plus the toolchain home.
+        val binds = listOf(projectsDir, toolchain.home, proj.root).distinct()
+        return toolchain.runInAlpine(check + shellCmd, proj.root, binds) { line, isError ->
+            val err = isError || line.contains("error", ignoreCase = true) || line.contains("fatal", ignoreCase = true)
+            onLine(BuildLine(line, err))
+        }
+    }
+
+    /** Single-quotes a shell argument so paths/names with spaces stay intact. */
+    private fun shellQuote(arg: String): String = "'" + arg.replace("'", "'\\''") + "'"
 
     fun stopBuild() {
         buildRunner.stop()
@@ -345,90 +389,103 @@ class AppState(context: Context) {
         }
     }
 
-    /** Friendly names -> Alpine package names. */
-    private val pkgAliases = mapOf(
-        "python" to "python3",
-        "node" to "nodejs",
-        "nodejs" to "nodejs npm",
-        "gcc" to "build-base",
-        "g++" to "build-base",
-        "java" to "openjdk17",
-        "javac" to "openjdk17",
-    )
+    /**
+     * Starts installing a toolchain by id (e.g. "flutter", "sdk", "python") and
+     * brings the Terminal into view so the user can watch the progress. Used by
+     * the Setup guide's one-tap Install buttons.
+     */
+    fun installTool(id: String) {
+        consoleVisible = true
+        selectBottomTab(BottomTab.TERMINAL)
+        runTerminal(appScope, "pkg install $id")
+    }
+
+    /** Ensures the Alpine Linux environment exists, installing it if needed. */
+    private suspend fun ensureAlpine(): Boolean {
+        if (toolchain.alpineInstalled) return true
+        terminalOutput.add(BuildLine("Setting up the Alpine Linux environment first (one-time, ~4 MB)…", false))
+        return toolchain.installAlpine { line, isError -> terminalOutput.add(BuildLine(line, isError)) }
+    }
+
+    /** Installs a single toolchain token, dispatching on how it is delivered. */
+    private suspend fun installOne(token: String): Boolean {
+        val emit: (String, Boolean) -> Unit = { line, isError -> terminalOutput.add(BuildLine(line, isError)) }
+        val tc = Toolchains.byId(token)
+        return when (val method = tc?.method) {
+            InstallMethod.Busybox -> {
+                if (toolchain.busyboxInstalled) { emit("busybox is already installed.", false); true }
+                else toolchain.installBusybox(emit)
+            }
+            InstallMethod.Alpine -> ensureAlpine()
+            InstallMethod.AndroidSdk -> ensureAlpine() && toolchain.installAndroidSdk(emit)
+            InstallMethod.Flutter -> ensureAlpine() && toolchain.installFlutter(emit)
+            InstallMethod.Gradle -> ensureAlpine() && toolchain.installGradle(emit)
+            is InstallMethod.Apk -> ensureAlpine() && toolchain.apkAdd(method.packages, emit)
+            // Not in the curated catalogue: treat it as a raw Alpine package name.
+            null -> ensureAlpine() && toolchain.apkAdd(token, emit)
+        }
+    }
+
+    private fun pkgUsage() {
+        terminalOutput.add(BuildLine("usage: pkg <install|uninstall|search|list|help> <name…>", false))
+        terminalOutput.add(BuildLine("  pkg install alpine        one-time: the full Linux environment", false))
+        terminalOutput.add(BuildLine("  pkg install python java cmake clang    dev toolchains", false))
+        terminalOutput.add(BuildLine("  pkg install sdk           Android command-line tools (sdkmanager)", false))
+        terminalOutput.add(BuildLine("  pkg install platform-tools   adb & fastboot", false))
+        terminalOutput.add(BuildLine("  pkg install flutter       Flutter + Dart SDK", false))
+        terminalOutput.add(BuildLine("  pkg install all           the common native dev set", false))
+        terminalOutput.add(BuildLine("available: " + Toolchains.all.joinToString(", ") { it.id }, false))
+    }
 
     /**
-     * Built-in package manager.
-     *  - `pkg install busybox` installs BusyBox into $PREFIX/bin (300+ commands).
-     *  - `pkg install alpine` sets up the Alpine Linux environment (proot).
-     *  - `pkg install <anything else>` installs real Alpine packages — cmake,
-     *    clang, make, python3, nodejs, openjdk17, go, … — setting up Alpine
-     *    first automatically when needed.
+     * Built-in package manager — `pkg`, modelled on Termux's. It installs real,
+     * arch-native tools into the on-device Linux environment: compilers (gcc,
+     * clang, cmake), languages (python, java, node, go), the Android SDK manager,
+     * Flutter/Dart, Gradle, adb/fastboot and more. The whole catalogue lives in
+     * [Toolchains], shared with the in-app Setup guide.
      */
     private fun handlePkg(scope: CoroutineScope, cmd: String) {
-        val parts = cmd.split(Regex("\\s+"))
-        val action = parts.getOrNull(1)
-        val target = parts.getOrNull(2)
-        when {
-            action == "install" && target == "busybox" -> {
-                if (toolchain.busyboxInstalled) {
-                    terminalOutput.add(BuildLine("busybox is already installed in PREFIX/bin.", false))
-                    return
-                }
+        val parts = cmd.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val action = parts.getOrNull(1)?.lowercase()
+        val targets = parts.drop(2)
+        when (action) {
+            "install", "add", "i" -> {
+                if (targets.isEmpty()) { pkgUsage(); return }
+                val wantsAll = targets.any { it.lowercase() in setOf("all", "everything") }
                 appScope.launch(Dispatchers.IO) {
-                    toolchain.installBusybox { line, isError ->
-                        terminalOutput.add(BuildLine(line, isError))
-                    }
-                }
-            }
-            action == "install" && target == "alpine" -> {
-                appScope.launch(Dispatchers.IO) {
-                    toolchain.installAlpine { line, isError ->
-                        terminalOutput.add(BuildLine(line, isError))
-                    }
-                }
-            }
-            action == "install" && target == "flutter" -> {
-                terminalOutput.add(BuildLine("Flutter does not ship an Android-hosted SDK yet, so it cannot run on-device.", true))
-                terminalOutput.add(BuildLine("You can still edit Flutter projects here and build them in the cloud.", false))
-            }
-            action == "install" && target != null -> {
-                val packages = parts.drop(2).joinToString(" ") { pkgAliases[it] ?: it }
-                appScope.launch(Dispatchers.IO) {
-                    if (!toolchain.alpineInstalled) {
-                        terminalOutput.add(BuildLine("Setting up the Alpine Linux environment first (one-time, ~4 MB)…", false))
-                        val ok = toolchain.installAlpine { line, isError ->
-                            terminalOutput.add(BuildLine(line, isError))
+                    val list = if (wantsAll) {
+                        terminalOutput.add(BuildLine("Installing the core dev set: ${Toolchains.coreSetup.joinToString(" ")}", false))
+                        terminalOutput.add(BuildLine("(Add the large SDKs separately: pkg install sdk | flutter)", false))
+                        Toolchains.coreSetup
+                    } else targets
+                    for (t in list) {
+                        terminalOutput.add(BuildLine("── installing $t ──", false))
+                        if (!installOne(t)) {
+                            terminalOutput.add(BuildLine("Stopped at '$t'. Fix the error above and retry.", true))
+                            return@launch
                         }
-                        if (!ok) return@launch
                     }
-                    terminalOutput.add(BuildLine("apk add $packages", false))
-                    val code = toolchain.runInAlpine(
-                        "apk update >/dev/null 2>&1; apk add $packages",
-                        null, emptyList(),
-                    ) { line, isError -> terminalOutput.add(BuildLine(line, isError)) }
-                    terminalOutput.add(
-                        if (code == 0) BuildLine("Installed: $packages — just type the command to use it.", false)
-                        else BuildLine("apk failed (exit $code). Try: pkg search <name>", true)
-                    )
+                    terminalOutput.add(BuildLine("Done. Type a tool's name to use it (e.g. python3, javac, cmake).", false))
                 }
             }
-            (action == "uninstall" || action == "remove") && target != null -> {
-                val packages = parts.drop(2).joinToString(" ") { pkgAliases[it] ?: it }
+            "uninstall", "remove", "rm", "del" -> {
+                if (targets.isEmpty()) { pkgUsage(); return }
+                val packages = targets.joinToString(" ") { token ->
+                    (Toolchains.byId(token)?.method as? InstallMethod.Apk)?.packages ?: token
+                }
                 runInAlpineFromTerminal(scope, "apk del $packages", projectsDir)
             }
-            action == "search" && target != null -> {
-                runInAlpineFromTerminal(scope, "apk update >/dev/null 2>&1; apk search ${parts.drop(2).joinToString(" ")}", projectsDir)
+            "search", "find" -> {
+                if (targets.isEmpty()) { pkgUsage(); return }
+                runInAlpineFromTerminal(scope, "apk update >/dev/null 2>&1; apk search ${targets.joinToString(" ")}", projectsDir)
             }
-            action == "list" -> {
+            "list" -> {
                 val tools = toolchain.bin.listFiles()?.map { it.name }?.sorted() ?: emptyList()
-                if (tools.isEmpty()) terminalOutput.add(BuildLine("No packages installed. Try: pkg install busybox", false))
-                else terminalOutput.add(BuildLine(tools.joinToString("  "), false))
+                if (tools.isNotEmpty()) terminalOutput.add(BuildLine("PREFIX/bin: " + tools.joinToString("  "), false))
                 if (toolchain.alpineInstalled) runInAlpineFromTerminal(scope, "apk info", projectsDir)
+                else terminalOutput.add(BuildLine("Linux environment not installed yet. Run: pkg install alpine", false))
             }
-            else -> {
-                terminalOutput.add(BuildLine("usage: pkg install <name…> | pkg uninstall <name…> | pkg search <name> | pkg list", false))
-                terminalOutput.add(BuildLine("examples: pkg install busybox | pkg install cmake clang make | pkg install python3", false))
-            }
+            else -> pkgUsage()
         }
     }
 }

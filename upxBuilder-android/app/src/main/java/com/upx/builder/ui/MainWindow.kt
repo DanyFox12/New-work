@@ -36,7 +36,7 @@ import com.upx.builder.editor.Language
 import com.upx.builder.i18n.StringKey
 import com.upx.builder.project.BuildAction
 
-private enum class ActiveDialog { NONE, NEW_PROJECT, OPEN_FOLDER, THEME, LANGUAGE, GUIDE }
+private enum class ActiveDialog { NONE, NEW_PROJECT, OPEN_FOLDER, THEME, LANGUAGE, GUIDE, SETUP }
 
 @Composable
 fun MainWindow(state: AppState) {
@@ -72,6 +72,7 @@ fun MainWindow(state: AppState) {
                             onChooseTheme = { dialog = ActiveDialog.THEME },
                             onChooseLanguage = { dialog = ActiveDialog.LANGUAGE },
                             onGuide = { dialog = ActiveDialog.GUIDE },
+                            onSetup = { dialog = ActiveDialog.SETUP },
                         )
 
                         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -90,6 +91,7 @@ fun MainWindow(state: AppState) {
                                     state = state,
                                     consoleHeight = consoleHeight,
                                     onNewProject = { dialog = ActiveDialog.NEW_PROJECT },
+                                    onSetup = { dialog = ActiveDialog.SETUP },
                                 )
                             }
                         }
@@ -127,6 +129,7 @@ fun MainWindow(state: AppState) {
                     ActiveDialog.THEME -> ThemeDialog(state) { dialog = ActiveDialog.NONE }
                     ActiveDialog.LANGUAGE -> LanguageDialog(state) { dialog = ActiveDialog.NONE }
                     ActiveDialog.GUIDE -> GuideDialog(state) { dialog = ActiveDialog.NONE }
+                    ActiveDialog.SETUP -> SetupGuideDialog(state) { dialog = ActiveDialog.NONE }
                     ActiveDialog.NONE -> Unit
                 }
             }
@@ -135,13 +138,13 @@ fun MainWindow(state: AppState) {
 }
 
 @Composable
-private fun EditorAndConsole(state: AppState, consoleHeight: Dp, onNewProject: () -> Unit) {
+private fun EditorAndConsole(state: AppState, consoleHeight: Dp, onNewProject: () -> Unit, onSetup: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val active = state.activeFile
             if (active == null) {
                 if (state.project == null) {
-                    WelcomeScreen(state, onNewProject = onNewProject)
+                    WelcomeScreen(state, onNewProject = onNewProject, onSetup = onSetup)
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(

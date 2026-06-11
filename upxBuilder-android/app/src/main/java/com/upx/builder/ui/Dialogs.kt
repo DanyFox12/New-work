@@ -54,6 +54,9 @@ import com.upx.builder.i18n.AppLanguage
 import com.upx.builder.i18n.StringKey
 import com.upx.builder.project.ProjectTemplate
 import com.upx.builder.project.Templates
+import com.upx.builder.project.ToolCategory
+import com.upx.builder.project.Toolchain
+import com.upx.builder.project.Toolchains
 import com.upx.builder.theme.Themes
 import java.io.File
 
@@ -276,6 +279,109 @@ fun GuideDialog(state: AppState, onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(state.tr(StringKey.CLOSE)) } },
     )
+}
+
+/**
+ * The Setup guide: a one-tap installer for every developer toolchain — the
+ * Android SDK, JDK/Java, platform-tools (adb), CMake, Python, Flutter/Dart,
+ * Node, Go, Git and the C/C++ compilers. Each card shows what it provides, the
+ * exact `pkg install …` command, and an Install button that runs it in the
+ * Terminal. Mirrors the in-terminal `pkg` manager, sharing the [Toolchains]
+ * catalogue so the two never disagree.
+ */
+@Composable
+fun SetupGuideDialog(state: AppState, onDismiss: () -> Unit) {
+    val categories = listOf(
+        ToolCategory.CORE to StringKey.CAT_CORE,
+        ToolCategory.LANGUAGE to StringKey.CAT_LANGUAGE,
+        ToolCategory.BUILD to StringKey.CAT_BUILD,
+        ToolCategory.ANDROID to StringKey.CAT_ANDROID,
+        ToolCategory.UTIL to StringKey.CAT_UTIL,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(state.tr(StringKey.SETUP_TITLE)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = state.tr(StringKey.SETUP_INTRO),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = { state.installTool("all"); onDismiss() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(state.tr(StringKey.INSTALL_CORE)) }
+                Spacer(Modifier.height(12.dp))
+
+                categories.forEach { (category, labelKey) ->
+                    val tools = Toolchains.byCategory(category)
+                    if (tools.isEmpty()) return@forEach
+                    Text(
+                        text = state.tr(labelKey),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+                    )
+                    tools.forEach { tool ->
+                        ToolCard(state, tool) { id -> state.installTool(id); onDismiss() }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(state.tr(StringKey.CLOSE)) } },
+    )
+}
+
+@Composable
+private fun ToolCard(state: AppState, tool: Toolchain, onInstall: (String) -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tool.displayName, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        tool.summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { onInstall(tool.id) }) { Text(state.tr(StringKey.INSTALL)) }
+            }
+            Spacer(Modifier.height(6.dp))
+            val sizeSuffix = if (tool.sizeHint.isNotEmpty()) "  •  ${tool.sizeHint}" else ""
+            Text(
+                text = "${state.tr(StringKey.PROVIDES)}: ${tool.provides}$sizeSuffix",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+            Text(
+                text = "$ ${tool.command}",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (tool.note.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = tool.note,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                )
+            }
+        }
+    }
 }
 
 /**

@@ -75,7 +75,10 @@ class BuildRunner(
         }
     }
 
-    private fun commandFor(language: Language, action: BuildAction, project: Project): List<String>? =
+    /** The command line that builds/runs/cleans a [project] in [language], or
+     *  null if the action is undefined. Public so callers can run it inside the
+     *  on-device Linux environment (proot/Alpine) instead of the host shell. */
+    fun commandFor(language: Language, action: BuildAction, project: Project): List<String>? =
         when (language) {
             Language.DART -> when (action) {
                 BuildAction.BUILD -> listOf("flutter", "build", "apk", "--debug")

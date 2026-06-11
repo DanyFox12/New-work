@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,7 +26,7 @@ import com.upx.builder.app.AppState
 import com.upx.builder.i18n.StringKey
 
 @Composable
-fun WelcomeScreen(state: AppState, onNewProject: () -> Unit) {
+fun WelcomeScreen(state: AppState, onNewProject: () -> Unit, onSetup: () -> Unit = {}) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
@@ -48,10 +50,17 @@ fun WelcomeScreen(state: AppState, onNewProject: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(28.dp))
-            Button(onClick = onNewProject) {
-                Icon(Icons.Filled.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(state.tr(StringKey.NEW_PROJECT))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = onNewProject) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(state.tr(StringKey.NEW_PROJECT))
+                }
+                OutlinedButton(onClick = onSetup) {
+                    Icon(Icons.Filled.Download, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(state.tr(StringKey.SETUP))
+                }
             }
         }
     }
