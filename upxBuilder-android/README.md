@@ -45,6 +45,20 @@ Two layers provide the tools:
    directly on the device's CPU. The terminal becomes an Alpine shell, with `cd`
    persisting between commands, exactly like Termux.
 
+On first launch the app **offers to download the environment automatically**
+(Essentials ~6 MB, or Everything ~600 MB), so new users never need to know the
+commands.
+
+**The proot launcher is verified, not assumed.** Some devices' seccomp filters
+kill generic Linux proot builds (the symptom is "killed by SIGSYS"). The app
+therefore tries, in order: the **Android-native proot** (built against bionic by
+[build-proot-android](https://github.com/green-green-avk/build-proot-android),
+bundled in the APK assets when built via the Colab notebook, otherwise fetched
+from that project), then the generic static proot-me build — and *probes each
+one by actually starting a shell* before marking the environment installed. The
+working choice is persisted, and failures print the real reason (signal, exit
+code, output) so problems are diagnosable from a screenshot.
+
 ### Installing toolchains (SDK, JDK, platform-tools, CMake, Python, Flutter…)
 
 Tap **Setup** (the download icon in the toolbar, or the button on the welcome

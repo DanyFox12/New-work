@@ -18,8 +18,8 @@ android {
         // ability to run installed tools. (Fine for sideloading; Play Store
         // would require 34+ and disallow this technique.)
         targetSdk = 28
-        versionCode = 10
-        versionName = "1.9.0"
+        versionCode = 11
+        versionName = "2.0.0"
     }
 
     lint {

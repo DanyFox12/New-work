@@ -55,7 +55,7 @@ class AppState(context: Context) {
     }
 
     /** On-device toolchain prefix (Termux-style): real tools live here. */
-    val toolchain = ToolchainManager(context.filesDir)
+    val toolchain = ToolchainManager(context.filesDir, context.assets)
 
     var theme by mutableStateOf(Themes.byId(prefs.getString("theme", Themes.default.id) ?: Themes.default.id))
         private set
@@ -106,6 +106,25 @@ class AppState(context: Context) {
 
     var building by mutableStateOf(false)
         private set
+
+    /** First-launch offer to download the dev environment automatically.
+     *  Shown once; never again after the user answers (or once tools exist). */
+    var setupPromptVisible by mutableStateOf(
+        !prefs.getBoolean("setup_prompted", false) && !toolchain.alpineInstalled
+    )
+        private set
+
+    fun dismissSetupPrompt() {
+        setupPromptVisible = false
+        prefs.edit().putBoolean("setup_prompted", true).apply()
+    }
+
+    /** "Install now" on the first-launch prompt: essentials = the Linux
+     *  environment + BusyBox; everything = essentials + the core dev set. */
+    fun acceptSetupPrompt(everything: Boolean) {
+        dismissSetupPrompt()
+        installTool(if (everything) "busybox all" else "busybox alpine")
+    }
 
     private val buildRunner = BuildRunner(toolchain.environment())
 
@@ -451,21 +470,38 @@ class AppState(context: Context) {
         when (action) {
             "install", "add", "i" -> {
                 if (targets.isEmpty()) { pkgUsage(); return }
-                val wantsAll = targets.any { it.lowercase() in setOf("all", "everything") }
+                // Expand "all" in place so e.g. `pkg install busybox all` keeps
+                // its order, and de-duplicate.
+                val list = targets.flatMap { t ->
+                    if (t.lowercase() in setOf("all", "everything")) Toolchains.coreSetup else listOf(t)
+                }.distinct()
+                if (list.size > targets.size) {
+                    terminalOutput.add(BuildLine("Core dev set: ${Toolchains.coreSetup.joinToString(" ")}", false))
+                    terminalOutput.add(BuildLine("(The large SDKs are separate: pkg install sdk | flutter)", false))
+                }
                 appScope.launch(Dispatchers.IO) {
-                    val list = if (wantsAll) {
-                        terminalOutput.add(BuildLine("Installing the core dev set: ${Toolchains.coreSetup.joinToString(" ")}", false))
-                        terminalOutput.add(BuildLine("(Add the large SDKs separately: pkg install sdk | flutter)", false))
-                        Toolchains.coreSetup
-                    } else targets
+                    val failed = mutableListOf<String>()
                     for (t in list) {
                         terminalOutput.add(BuildLine("── installing $t ──", false))
-                        if (!installOne(t)) {
-                            terminalOutput.add(BuildLine("Stopped at '$t'. Fix the error above and retry.", true))
+                        if (installOne(t)) continue
+                        failed += t
+                        // Everything except BusyBox runs inside the Linux
+                        // environment; if THAT is broken, the remaining installs
+                        // would all fail the same way — stop instead of spamming.
+                        val needsAlpine = Toolchains.byId(t)?.method != InstallMethod.Busybox
+                        if (needsAlpine && !toolchain.alpineInstalled) {
+                            terminalOutput.add(BuildLine("The Linux environment could not start, so the remaining tools were skipped.", true))
+                            terminalOutput.add(BuildLine("The lines above show the exact reason. Once fixed, retry: pkg install ${list.joinToString(" ")}", true))
                             return@launch
                         }
                     }
-                    terminalOutput.add(BuildLine("Done. Type a tool's name to use it (e.g. python3, javac, cmake).", false))
+                    terminalOutput.add(
+                        if (failed.isEmpty()) {
+                            BuildLine("Done. Type a tool's name to use it (e.g. python3, javac, cmake).", false)
+                        } else {
+                            BuildLine("Finished, but these failed: ${failed.joinToString(", ")} — see the errors above. Retry: pkg install ${failed.joinToString(" ")}", true)
+                        }
+                    )
                 }
             }
             "uninstall", "remove", "rm", "del" -> {

@@ -282,6 +282,42 @@ fun GuideDialog(state: AppState, onDismiss: () -> Unit) {
 }
 
 /**
+ * First-launch offer: download the development environment automatically.
+ * "Essentials" sets up the Linux environment + BusyBox (~6 MB); "Everything"
+ * adds the core dev set (compilers, Python, Java, Node, Go, Git). Shown once —
+ * answering (or dismissing) never asks again; Setup stays in the toolbar.
+ */
+@Composable
+fun SetupPromptDialog(state: AppState) {
+    AlertDialog(
+        onDismissRequest = { state.dismissSetupPrompt() },
+        title = { Text(state.tr(StringKey.SETUP_PROMPT_TITLE)) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = state.tr(StringKey.SETUP_PROMPT_BODY),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                )
+                Spacer(Modifier.height(14.dp))
+                Button(
+                    onClick = { state.acceptSetupPrompt(everything = false) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(state.tr(StringKey.INSTALL_ESSENTIALS)) }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { state.acceptSetupPrompt(everything = true) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(state.tr(StringKey.INSTALL_EVERYTHING)) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { state.dismissSetupPrompt() }) { Text(state.tr(StringKey.LATER)) }
+        },
+    )
+}
+
+/**
  * The Setup guide: a one-tap installer for every developer toolchain — the
  * Android SDK, JDK/Java, platform-tools (adb), CMake, Python, Flutter/Dart,
  * Node, Go, Git and the C/C++ compilers. Each card shows what it provides, the

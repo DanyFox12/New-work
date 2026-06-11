@@ -20,7 +20,12 @@ import java.net.URL
  *  - Executing app-private binaries requires targetSdkVersion <= 28
  *    (the app's build.gradle pins this, exactly like Termux/AndroidIDE).
  */
-class ToolchainManager(filesDir: File) {
+class ToolchainManager(
+    filesDir: File,
+    /** App assets, so toolchain bootstrap files bundled in the APK (under
+     *  assets/proot/) can be used before falling back to network downloads. */
+    private val assets: android.content.res.AssetManager? = null,
+) {
 
     val prefix = File(filesDir, "usr")
     val bin = File(prefix, "bin")
@@ -158,14 +163,58 @@ class ToolchainManager(filesDir: File) {
     // exactly this technique.
     // ------------------------------------------------------------------
 
-    private val proot = File(bin, "proot")
+    // Two proot builds are known:
+    //  1. The Android-native build (green-green-avk/build-proot-android): compiled
+    //     with the NDK against bionic (interpreter /system/bin/linker64), with its
+    //     loader binaries separate. This is what Android terminal apps use and it
+    //     runs on devices whose seccomp filters kill generic Linux builds.
+    //  2. The generic musl-static build from proot-me — kept as a fallback.
+    // Each candidate is PROBED (it must actually start a shell in Alpine) before
+    // the environment is marked installed, and the working choice is persisted.
+
+    /** Where the Android-native proot package is unpacked. */
+    private val prootDist = File(prefix, "proot-dist")
+    private val distProot = File(prootDist, "root/bin/proot")
+    private val distLoader = File(prootDist, "root/libexec/proot/loader")
+    private val distLoader32 = File(prootDist, "root/libexec/proot/loader32")
+
+    /** The generic static proot (fallback) lives here. */
+    private val staticProot = File(bin, "proot")
+
+    /** Holds the absolute path of the proot binary that passed the probe. */
+    private val prootChoiceMarker = File(prefix, "etc/proot-binary")
 
     /** Marker written when this device's proot supports --link2symlink
      *  (needed because app storage forbids hard links, which apk creates). */
     private val link2symlinkMarker = File(prefix, "etc/proot-link2symlink")
 
+    /** Present only after a probe confirmed the environment actually starts.
+     *  Without this, a downloaded-but-broken proot must NOT count as installed. */
+    private val verifiedMarker = File(prefix, "etc/alpine-verified")
+
+    /** The proot binary verified to work on this device (marker first). */
+    private fun chosenProot(): File? {
+        val fromMarker = runCatching { prootChoiceMarker.readText().trim() }.getOrNull()
+            ?.let { File(it) }?.takeIf { it.canExecute() }
+        return fromMarker ?: listOf(distProot, staticProot).firstOrNull { it.canExecute() }
+    }
+
     val alpineInstalled: Boolean
-        get() = proot.canExecute() && File(alpineRoot, "etc/alpine-release").exists()
+        get() = chosenProot() != null &&
+            File(alpineRoot, "etc/alpine-release").exists() &&
+            verifiedMarker.exists()
+
+    /** Architecture name used by the Android-native proot packages. */
+    private fun androidProotArch(): String? {
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return null
+        return when {
+            abi.startsWith("arm64") -> "aarch64"
+            abi.startsWith("armeabi") -> "armv7a"
+            abi.startsWith("x86_64") -> "x86_64"
+            abi.startsWith("x86") -> "i686"
+            else -> null
+        }
+    }
 
     private fun prootUrl(): String? {
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return null
@@ -176,6 +225,145 @@ class ToolchainManager(filesDir: File) {
             else -> return null
         }
         return "https://github.com/proot-me/proot/releases/download/v5.3.0/proot-v5.3.0-$arch-static"
+    }
+
+    /** Unpacks an Android-native proot package into [prootDist]. */
+    private fun unpackProotDist(tarball: File, onLine: (String, Boolean) -> Unit): Boolean {
+        prootDist.deleteRecursively()
+        prootDist.mkdirs()
+        val ok = extractTarGz(tarball, prootDist, onLine)
+        tarball.delete()
+        if (!ok || !distProot.exists()) return false
+        distProot.setExecutable(true, false)
+        if (distLoader.exists()) distLoader.setExecutable(true, false)
+        if (distLoader32.exists()) distLoader32.setExecutable(true, false)
+        return true
+    }
+
+    /** Installs the Android-native proot bundled in the APK's assets, if present. */
+    private fun installAndroidProotFromAsset(onLine: (String, Boolean) -> Unit): Boolean {
+        val assetManager = assets ?: return false
+        val arch = androidProotArch() ?: return false
+        val tarball = File(tmp, "proot-android.tar.gz")
+        try {
+            assetManager.open("proot/proot-android-$arch.tar.gz").use { input ->
+                tarball.outputStream().use { output -> input.copyTo(output) }
+            }
+        } catch (_: Exception) {
+            return false // not bundled in this APK build
+        }
+        onLine("Using the Android proot launcher bundled in the app…", false)
+        return unpackProotDist(tarball, onLine)
+    }
+
+    /** Downloads the Android-native proot package from the upstream project. */
+    private fun installAndroidProotFromUrl(onLine: (String, Boolean) -> Unit): Boolean {
+        val arch = androidProotArch() ?: return false
+        val tarball = File(tmp, "proot-android.tar.gz")
+        val url = "https://raw.githubusercontent.com/green-green-avk/build-proot-android/master/packages/proot-android-$arch.tar.gz"
+        if (!downloadTo(url, tarball, onLine)) return false
+        return unpackProotDist(tarball, onLine)
+    }
+
+    /** Downloads the generic static proot (fallback for unusual setups). */
+    private fun installStaticProot(onLine: (String, Boolean) -> Unit): Boolean {
+        if (staticProot.canExecute()) return true
+        val purl = prootUrl()
+        if (purl == null) {
+            onLine("Unsupported CPU: ${Build.SUPPORTED_ABIS.joinToString()}", true)
+            return false
+        }
+        if (!downloadTo(purl, staticProot, onLine)) return false
+        if (!isElf(staticProot)) {
+            onLine("proot download is not a valid executable.", true)
+            staticProot.delete()
+            return false
+        }
+        staticProot.setExecutable(true, false)
+        return true
+    }
+
+    /**
+     * Tries every proot candidate until one actually starts a shell inside
+     * Alpine on THIS device, persisting the working choice. Failures are
+     * reported with the real reason (signal/exit/output) instead of a generic
+     * "could not start" so problems are diagnosable from a screenshot.
+     */
+    private fun verifyProot(onLine: (String, Boolean) -> Unit): Boolean {
+        File(prefix, "etc").mkdirs()
+        verifiedMarker.delete()
+
+        var androidDistReady = false
+        val candidates = listOf<Triple<String, () -> Boolean, File>>(
+            Triple("Android proot (bundled)", {
+                installAndroidProotFromAsset(onLine).also { androidDistReady = it }
+            }, distProot),
+            Triple("Android proot (online)", {
+                // Same content as the bundled package — skip if that already failed.
+                if (androidDistReady) false else installAndroidProotFromUrl(onLine)
+            }, distProot),
+            Triple("generic static proot", { installStaticProot(onLine) }, staticProot),
+        )
+
+        for ((label, install, binary) in candidates) {
+            if (!runCatching(install).getOrDefault(false)) continue
+            for (link2symlink in listOf(true, false)) {
+                val (ok, why) = probeProot(binary, link2symlink)
+                if (ok) {
+                    prootChoiceMarker.writeText(binary.absolutePath)
+                    if (link2symlink) link2symlinkMarker.writeText("1") else link2symlinkMarker.delete()
+                    verifiedMarker.writeText("1")
+                    onLine("Launcher verified: $label.", false)
+                    return true
+                }
+                onLine("  ✗ $label${if (link2symlink) " [link2symlink]" else ""}: $why", true)
+            }
+        }
+        onLine("No proot build could start on this device.", true)
+        onLine("Please report your device model + Android version (the lines above show why each attempt failed).", true)
+        return false
+    }
+
+    /** Runs `echo` inside Alpine with [binary]; returns success + failure detail.
+     *  A watchdog thread kills the probe after 30 s so a hanging proot can never
+     *  freeze an install (Process.waitFor(timeout) needs API 26; minSdk is 24). */
+    private fun probeProot(binary: File, link2symlink: Boolean): Pair<Boolean, String> = try {
+        val p = ProcessBuilder(prootArgv(binary, link2symlink, null, emptyList(), "echo upx-ok"))
+            .redirectErrorStream(true)
+            .apply { environment().putAll(prootEnv(binary)) }
+            .start()
+        var timedOut = false
+        val watchdog = Thread {
+            try {
+                Thread.sleep(30_000)
+                timedOut = true
+                p.destroy()
+            } catch (_: InterruptedException) {
+            }
+        }.apply { isDaemon = true; start() }
+        val out = p.inputStream.bufferedReader().readText()
+        val code = p.waitFor()
+        watchdog.interrupt()
+        when {
+            timedOut -> false to "timed out after 30 s"
+            code == 0 && out.contains("upx-ok") -> true to ""
+            else -> false to describeFailure(code, out)
+        }
+    } catch (e: Exception) {
+        false to (e.message ?: "failed to start the process")
+    }
+
+    private fun describeFailure(code: Int, out: String): String {
+        val sig = code - 128
+        val why = when {
+            sig == 31 -> "killed by SIGSYS — this device's seccomp filter blocked the binary"
+            sig == 9 -> "killed (SIGKILL — out of memory or stopped by the system)"
+            sig == 11 -> "crashed (SIGSEGV)"
+            code > 128 -> "killed by signal $sig"
+            else -> "exit $code"
+        }
+        val tail = out.trim().lines().lastOrNull { it.isNotBlank() }.orEmpty()
+        return if (tail.isEmpty()) why else "$why — $tail"
     }
 
     private fun alpineUrls(): List<String> {
@@ -197,50 +385,40 @@ class ToolchainManager(filesDir: File) {
     }
 
     /**
-     * Installs the Alpine environment: downloads proot + the Alpine mini root
-     * filesystem, unpacks it with the built-in pure-Kotlin extractor (no
-     * downloaded binary needed), configures DNS and apk repositories, then
-     * test-runs a shell inside it to confirm proot works on this device.
+     * Installs the Alpine environment: downloads the Alpine mini root filesystem
+     * if it is not already on the device, unpacks it with the built-in
+     * pure-Kotlin extractor, configures DNS and apk repositories, then finds a
+     * proot build that ACTUALLY starts on this device (bundled Android build →
+     * downloaded Android build → generic static build) before declaring success.
      */
     suspend fun installAlpine(onLine: (String, Boolean) -> Unit): Boolean = withContext(Dispatchers.IO) {
         if (alpineInstalled) {
-            onLine("Alpine Linux is already installed.", false)
+            onLine("Alpine Linux is already installed and verified.", false)
             return@withContext true
         }
 
-        val purl = prootUrl()
-        if (purl == null) {
-            onLine("Unsupported CPU: ${Build.SUPPORTED_ABIS.joinToString()}", true)
-            return@withContext false
-        }
-        if (!proot.canExecute()) {
-            if (!downloadTo(purl, proot, onLine)) return@withContext false
-            if (!isElf(proot)) {
-                onLine("proot download is not a valid executable. Aborting.", true)
-                proot.delete()
+        if (!File(alpineRoot, "etc/alpine-release").exists()) {
+            val tarball = File(tmp, "alpine-minirootfs.tar.gz")
+            var downloaded = false
+            for (url in alpineUrls()) {
+                if (downloadTo(url, tarball, onLine)) { downloaded = true; break }
+                onLine("Trying next mirror…", false)
+            }
+            if (!downloaded) {
+                onLine("Could not download Alpine from any mirror. Check the connection and retry.", true)
                 return@withContext false
             }
-            proot.setExecutable(true, false)
-        }
 
-        val tarball = File(tmp, "alpine-minirootfs.tar.gz")
-        var downloaded = false
-        for (url in alpineUrls()) {
-            if (downloadTo(url, tarball, onLine)) { downloaded = true; break }
-            onLine("Trying next mirror…", false)
-        }
-        if (!downloaded) {
-            onLine("Could not download Alpine from any mirror. Check the connection and retry.", true)
-            return@withContext false
-        }
-
-        onLine("Unpacking Alpine Linux…", false)
-        alpineRoot.mkdirs()
-        val unpacked = extractTarGz(tarball, alpineRoot, onLine)
-        tarball.delete()
-        if (!unpacked || !File(alpineRoot, "etc/alpine-release").exists()) {
-            onLine("Alpine unpack failed.", true)
-            return@withContext false
+            onLine("Unpacking Alpine Linux…", false)
+            alpineRoot.mkdirs()
+            val unpacked = extractTarGz(tarball, alpineRoot, onLine)
+            tarball.delete()
+            if (!unpacked || !File(alpineRoot, "etc/alpine-release").exists()) {
+                onLine("Alpine unpack failed.", true)
+                return@withContext false
+            }
+        } else {
+            onLine("Linux files already on the device — checking the launcher…", false)
         }
 
         // DNS + package repositories (main + community = thousands of packages).
@@ -250,34 +428,11 @@ class ToolchainManager(filesDir: File) {
                 "https://dl-cdn.alpinelinux.org/alpine/v3.20/community\n"
         )
 
-        // Confirm proot actually runs on this device, preferring --link2symlink
-        // (apk needs it because app storage forbids hard links).
-        File(prefix, "etc").mkdirs()
-        link2symlinkMarker.delete()
-        val withFlag = probeAlpine(link2symlink = true)
-        if (withFlag) {
-            link2symlinkMarker.writeText("1")
-        } else if (!probeAlpine(link2symlink = false)) {
-            onLine("proot could not start a shell on this device.", true)
-            return@withContext false
-        }
+        if (!verifyProot(onLine)) return@withContext false
 
         onLine("Alpine Linux ${File(alpineRoot, "etc/alpine-release").readText().trim()} installed!", false)
-        onLine("Install real compilers now, e.g.:", false)
-        onLine("  pkg install cmake clang make python3 nodejs", false)
+        onLine("Install real tools now, e.g.: pkg install python java cmake — or open Setup.", false)
         true
-    }
-
-    /** Runs `echo` inside Alpine to verify proot works with the given flag. */
-    private fun probeAlpine(link2symlink: Boolean): Boolean = try {
-        val p = ProcessBuilder(prootArgv(link2symlink, null, emptyList(), "echo upx-ok"))
-            .redirectErrorStream(true)
-            .apply { environment().putAll(prootEnv()) }
-            .start()
-        val out = p.inputStream.bufferedReader().readText()
-        p.waitFor() == 0 && out.contains("upx-ok")
-    } catch (_: Exception) {
-        false
     }
 
     /**
@@ -292,26 +447,33 @@ class ToolchainManager(filesDir: File) {
         binds: List<File>,
         onLine: (String, Boolean) -> Unit,
     ): Int = try {
-        val p = ProcessBuilder(prootArgv(link2symlinkMarker.exists(), workDir, binds, command))
-            .redirectErrorStream(true)
-            .apply { environment().putAll(prootEnv()) }
-            .start()
-        p.inputStream.bufferedReader().useLines { lines ->
-            lines.forEach { onLine(it, false) }
+        val binary = chosenProot()
+        if (binary == null) {
+            onLine("The Linux launcher is missing — run: pkg install alpine", true)
+            -1
+        } else {
+            val p = ProcessBuilder(prootArgv(binary, link2symlinkMarker.exists(), workDir, binds, command))
+                .redirectErrorStream(true)
+                .apply { environment().putAll(prootEnv(binary)) }
+                .start()
+            p.inputStream.bufferedReader().useLines { lines ->
+                lines.forEach { onLine(it, false) }
+            }
+            p.waitFor()
         }
-        p.waitFor()
     } catch (e: Exception) {
         onLine("alpine error: ${e.message}", true)
         -1
     }
 
     private fun prootArgv(
+        binary: File,
         link2symlink: Boolean,
         workDir: File?,
         binds: List<File>,
         command: String,
     ): List<String> {
-        val argv = mutableListOf(proot.absolutePath, "-r", alpineRoot.absolutePath)
+        val argv = mutableListOf(binary.absolutePath, "-r", alpineRoot.absolutePath)
         if (link2symlink) argv += "--link2symlink"
         argv += listOf("-0", "-b", "/dev", "-b", "/proc", "-b", "/sys")
         binds.forEach { argv += listOf("-b", it.absolutePath) }
@@ -331,12 +493,21 @@ class ToolchainManager(filesDir: File) {
         return argv
     }
 
-    private fun prootEnv(): Map<String, String> = mapOf(
-        // proot keeps its runtime state here; the default /tmp does not exist.
-        "PROOT_TMP_DIR" to tmp.absolutePath,
-        // Avoids seccomp issues on several Android versions (Termux does the same).
-        "PROOT_NO_SECCOMP" to "1",
-    )
+    private fun prootEnv(binary: File): Map<String, String> {
+        val env = mutableMapOf(
+            // proot keeps its runtime state here; the default /tmp does not exist.
+            "PROOT_TMP_DIR" to tmp.absolutePath,
+            // Avoids seccomp issues on several Android versions (Termux does the same).
+            "PROOT_NO_SECCOMP" to "1",
+        )
+        // The Android-native build ships its loaders as separate files and finds
+        // them through these variables (the static build embeds its loader).
+        if (binary == distProot) {
+            if (distLoader.exists()) env["PROOT_LOADER"] = distLoader.absolutePath
+            if (distLoader32.exists()) env["PROOT_LOADER_32"] = distLoader32.absolutePath
+        }
+        return env
+    }
 
     // ------------------------------------------------------------------
     // Named toolchain installers. apk packages are arch-native and handled

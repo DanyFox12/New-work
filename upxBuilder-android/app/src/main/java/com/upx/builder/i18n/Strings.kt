@@ -39,7 +39,8 @@ enum class StringKey {
     GUIDE_TITLE, BUILD_STARTED, BUILD_FINISHED, BUILD_FAILED, TOOL_NOT_FOUND,
     INSTRUCTIONS,
     SETUP, SETUP_TITLE, SETUP_INTRO, INSTALL, INSTALL_CORE, PROVIDES, ALREADY_INSTALLED,
-    CAT_CORE, CAT_LANGUAGE, CAT_BUILD, CAT_ANDROID, CAT_UTIL
+    CAT_CORE, CAT_LANGUAGE, CAT_BUILD, CAT_ANDROID, CAT_UTIL,
+    SETUP_PROMPT_TITLE, SETUP_PROMPT_BODY, INSTALL_ESSENTIALS, INSTALL_EVERYTHING, LATER
 }
 
 object Strings {
@@ -120,6 +121,11 @@ object Strings {
         StringKey.CAT_BUILD to "Build tools",
         StringKey.CAT_ANDROID to "Android & mobile",
         StringKey.CAT_UTIL to "Utilities",
+        StringKey.SETUP_PROMPT_TITLE to "Set up the dev environment?",
+        StringKey.SETUP_PROMPT_BODY to "upxBuilder can download what it needs automatically. Essentials = the Linux environment + 300 Unix commands (~6 MB). Everything = essentials + compilers, Python, Java, Node, Go and Git (~600 MB — Wi-Fi recommended). You can always do this later from Setup.",
+        StringKey.INSTALL_ESSENTIALS to "Essentials (~6 MB)",
+        StringKey.INSTALL_EVERYTHING to "Everything (~600 MB)",
+        StringKey.LATER to "Later",
     )
 
     private val ar = mapOf(
@@ -199,6 +205,11 @@ object Strings {
         StringKey.CAT_BUILD to "أدوات البناء",
         StringKey.CAT_ANDROID to "أندرويد والهاتف",
         StringKey.CAT_UTIL to "أدوات مساعدة",
+        StringKey.SETUP_PROMPT_TITLE to "إعداد بيئة التطوير؟",
+        StringKey.SETUP_PROMPT_BODY to "يمكن لـ upxBuilder تنزيل ما يحتاجه تلقائيًا. الأساسيات = بيئة Linux و300 أمر Unix (~6 م.ب). كل شيء = الأساسيات + المترجمات وPython وJava وNode وGo وGit (~600 م.ب — يُفضّل Wi-Fi). يمكنك دائمًا فعل ذلك لاحقًا من «الإعداد».",
+        StringKey.INSTALL_ESSENTIALS to "الأساسيات (~6 م.ب)",
+        StringKey.INSTALL_EVERYTHING to "كل شيء (~600 م.ب)",
+        StringKey.LATER to "لاحقًا",
     )
 
     private val zh = mapOf(
@@ -278,6 +289,11 @@ object Strings {
         StringKey.CAT_BUILD to "构建工具",
         StringKey.CAT_ANDROID to "安卓与移动",
         StringKey.CAT_UTIL to "实用工具",
+        StringKey.SETUP_PROMPT_TITLE to "要配置开发环境吗？",
+        StringKey.SETUP_PROMPT_BODY to "upxBuilder 可以自动下载所需内容。基础组件 = Linux 环境 + 300 个 Unix 命令（约 6 MB）。全部 = 基础组件 + 编译器、Python、Java、Node、Go 和 Git（约 600 MB，建议使用 Wi-Fi）。您也可以稍后在“环境配置”中进行。",
+        StringKey.INSTALL_ESSENTIALS to "基础组件（约 6 MB）",
+        StringKey.INSTALL_EVERYTHING to "全部（约 600 MB）",
+        StringKey.LATER to "稍后",
     )
 
     private val it = mapOf(
@@ -357,6 +373,11 @@ object Strings {
         StringKey.CAT_BUILD to "Strumenti di build",
         StringKey.CAT_ANDROID to "Android e mobile",
         StringKey.CAT_UTIL to "Utilità",
+        StringKey.SETUP_PROMPT_TITLE to "Configurare l'ambiente di sviluppo?",
+        StringKey.SETUP_PROMPT_BODY to "upxBuilder può scaricare automaticamente il necessario. Essenziali = ambiente Linux + 300 comandi Unix (~6 MB). Tutto = essenziali + compilatori, Python, Java, Node, Go e Git (~600 MB — consigliato il Wi-Fi). Puoi sempre farlo più tardi da Setup.",
+        StringKey.INSTALL_ESSENTIALS to "Essenziali (~6 MB)",
+        StringKey.INSTALL_EVERYTHING to "Tutto (~600 MB)",
+        StringKey.LATER to "Più tardi",
     )
 
     private val tables: Map<AppLanguage, Map<StringKey, String>> = mapOf(

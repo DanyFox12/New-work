@@ -123,6 +123,11 @@ fun MainWindow(state: AppState) {
                     }
                 }
 
+                // First launch: offer to download the dev environment automatically.
+                if (state.setupPromptVisible && dialog == ActiveDialog.NONE) {
+                    SetupPromptDialog(state)
+                }
+
                 when (dialog) {
                     ActiveDialog.NEW_PROJECT -> NewProjectDialog(state) { dialog = ActiveDialog.NONE }
                     ActiveDialog.OPEN_FOLDER -> OpenFolderDialog(state) { dialog = ActiveDialog.NONE }
