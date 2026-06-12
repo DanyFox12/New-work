@@ -134,12 +134,31 @@ class AppState(context: Context) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     init {
-        if (toolchain.alpineInstalled) {
-            terminalOutput.add(BuildLine("Linux environment ready. Add tools with: pkg install python java cmake flutter sdk …", false))
-            terminalOutput.add(BuildLine("Tip: open Setup (toolbar) for one-tap installs, or run 'pkg help'.", false))
-        } else {
-            terminalOutput.add(BuildLine("Welcome! Tap Setup in the toolbar, or run 'pkg install alpine' to unlock the full Linux environment (like Termux).", false))
-            terminalOutput.add(BuildLine("Then: pkg install all  •  pkg install flutter  •  pkg install sdk  •  pkg help", false))
+        when {
+            toolchain.alpineInstalled -> {
+                terminalOutput.add(BuildLine("Linux environment ready. Add tools with: pkg install python java cmake flutter sdk …", false))
+                terminalOutput.add(BuildLine("Tip: open Setup (toolbar) for one-tap installs, or run 'pkg help'.", false))
+            }
+            // This APK carries the private environment bootstrap (proot + Alpine
+            // + BusyBox in the assets) — set it up automatically, Termux-style.
+            // It is local data, so this is fast and needs no network or consent.
+            toolchain.hasBundledBootstrap -> {
+                terminalOutput.add(BuildLine("First launch — setting up the built-in Linux environment…", false))
+                appScope.launch(Dispatchers.IO) {
+                    if (!toolchain.busyboxInstalled) {
+                        toolchain.installBusybox { line, isError -> terminalOutput.add(BuildLine(line, isError)) }
+                    }
+                    val ok = toolchain.installAlpine { line, isError -> terminalOutput.add(BuildLine(line, isError)) }
+                    terminalOutput.add(
+                        if (ok) BuildLine("Terminal ready — every Linux command works. Add tools via Setup or: pkg install all", false)
+                        else BuildLine("Automatic setup failed — see above. Retry with: pkg install alpine", true)
+                    )
+                }
+            }
+            else -> {
+                terminalOutput.add(BuildLine("Welcome! Tap Setup in the toolbar, or run 'pkg install alpine' to unlock the full Linux environment (like Termux).", false))
+                terminalOutput.add(BuildLine("Then: pkg install all  •  pkg install flutter  •  pkg install sdk  •  pkg help", false))
+            }
         }
     }
 

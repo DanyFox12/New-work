@@ -3,6 +3,8 @@ package com.upx.builder.project
 import android.os.Build
 import android.system.Os
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -55,24 +57,65 @@ class ToolchainManager(
 
     val busyboxInstalled: Boolean get() = busybox.canExecute()
 
+    /** Serialises environment installs so concurrent triggers (first-launch
+     *  auto-bootstrap + a user command) can never corrupt the rootfs. */
+    private val installMutex = Mutex()
+
+    /**
+     * True when this APK carries the complete private environment bootstrap for
+     * this device's CPU (proot launcher + Alpine base system in the assets —
+     * upxBuilder's equivalent of Termux's libtermux-bootstrap, but built from
+     * path-independent pieces so it works under any applicationId). The Colab
+     * notebook bundles it automatically; without it the app downloads the same
+     * files at install time.
+     */
+    val hasBundledBootstrap: Boolean
+        get() {
+            val assetManager = assets ?: return false
+            val prootArch = androidProotArch() ?: return false
+            val rootfsArch = alpineArch() ?: return false
+            return runCatching { assetManager.open("proot/proot-android-$prootArch.tar.gz").close() }.isSuccess &&
+                runCatching { assetManager.open("alpine/alpine-minirootfs-$rootfsArch.tar.gz").close() }.isSuccess
+        }
+
+    /** BusyBox build name for this device's CPU. */
+    private fun busyboxVariant(): String? {
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return null
+        return when {
+            abi.startsWith("arm64") -> "busybox-armv8l"
+            abi.startsWith("armeabi") -> "busybox-armv7l"
+            abi.startsWith("x86_64") -> "busybox-x86_64"
+            abi.startsWith("x86") -> "busybox-i686"
+            else -> null
+        }
+    }
+
     /**
      * Mirrors of statically linked BusyBox builds (musl libc, zero shared-lib
      * dependencies — they run on Android kernels as-is) for this device's CPU.
      * We try each in order so one mirror being down does not break the install.
      */
     private fun busyboxUrls(): List<String> {
-        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return emptyList()
-        val variant = when {
-            abi.startsWith("arm64") -> "busybox-armv8l"
-            abi.startsWith("armeabi") -> "busybox-armv7l"
-            abi.startsWith("x86_64") -> "busybox-x86_64"
-            abi.startsWith("x86") -> "busybox-i686"
-            else -> return emptyList()
-        }
+        val variant = busyboxVariant() ?: return emptyList()
         return listOf(
             "https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/$variant",
             "https://frippery.org/files/busybox/$variant",
         )
+    }
+
+    /** Copies the BusyBox bundled in the APK's assets, if this build has one. */
+    private fun copyBusyboxFromAsset(onLine: (String, Boolean) -> Unit): Boolean {
+        val assetManager = assets ?: return false
+        val variant = busyboxVariant() ?: return false
+        return try {
+            assetManager.open("busybox/$variant").use { input ->
+                busybox.outputStream().use { output -> input.copyTo(output) }
+            }
+            onLine("Using the BusyBox bundled in the app…", false)
+            true
+        } catch (_: Exception) {
+            false // not bundled in this APK build
+        }
     }
 
     /** A safe default applet set, used if `busybox --list` cannot be parsed. */
@@ -91,18 +134,25 @@ class ToolchainManager(
      * Unix commands (ls, grep, vi, tar, wget, unzip, …) work by name.
      */
     suspend fun installBusybox(onLine: (String, Boolean) -> Unit): Boolean = withContext(Dispatchers.IO) {
-        val urls = busyboxUrls()
-        if (urls.isEmpty()) {
-            onLine("Unsupported CPU: ${Build.SUPPORTED_ABIS.joinToString()}", true)
-            return@withContext false
+        installMutex.withLock {
+        if (busyboxInstalled) {
+            onLine("BusyBox is already installed.", false)
+            return@withContext true
         }
-
-        var downloaded = false
-        for (url in urls) {
-            if (downloadTo(url, busybox, onLine)) { downloaded = true; break }
-            onLine("Trying next mirror…", false)
+        // Prefer the copy bundled inside the APK; download only without one.
+        var obtained = copyBusyboxFromAsset(onLine)
+        if (!obtained) {
+            val urls = busyboxUrls()
+            if (urls.isEmpty()) {
+                onLine("Unsupported CPU: ${Build.SUPPORTED_ABIS.joinToString()}", true)
+                return@withContext false
+            }
+            for (url in urls) {
+                if (downloadTo(url, busybox, onLine)) { obtained = true; break }
+                onLine("Trying next mirror…", false)
+            }
         }
-        if (!downloaded) {
+        if (!obtained) {
             onLine("All mirrors failed. Check the device's internet connection and retry.", true)
             return@withContext false
         }
@@ -150,6 +200,7 @@ class ToolchainManager(
         onLine("Installed $linked commands into \$PREFIX/bin.", false)
         onLine("Toolchain ready — try: ls, uname -a, wget, tar, grep.", false)
         true
+        } // installMutex
     }
 
     // ------------------------------------------------------------------
@@ -414,6 +465,7 @@ class ToolchainManager(
      * downloaded Android build → generic static build) before declaring success.
      */
     suspend fun installAlpine(onLine: (String, Boolean) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        installMutex.withLock {
         if (alpineInstalled) {
             onLine("Alpine Linux is already installed and verified.", false)
             return@withContext true
@@ -458,6 +510,7 @@ class ToolchainManager(
         onLine("Alpine Linux ${File(alpineRoot, "etc/alpine-release").readText().trim()} installed!", false)
         onLine("Install real tools now, e.g.: pkg install python java cmake — or open Setup.", false)
         true
+        } // installMutex
     }
 
     /**

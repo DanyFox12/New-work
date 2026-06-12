@@ -50,10 +50,22 @@ On first launch the app **offers to download the environment automatically**
 commands.
 
 The terminal itself is styled like Termux — always dark, green prompt —
-whatever app theme is active. When built via the Colab notebook, **both the
-proot launcher and the Alpine base system are bundled inside the APK**
-(AndroidIDE bundles its Termux bootstrap the same way), so the environment
-sets up with zero network; otherwise the app downloads them on first install.
+whatever app theme is active.
+
+### upx-bootstrap: the private environment bootstrap
+
+When built via the Colab notebook, the APK carries the app's **own environment
+bootstrap** in its assets — the proot launcher, the Alpine base system and a
+static BusyBox. On first launch the app detects it and **sets the whole Linux
+environment up automatically, offline** (`hasBundledBootstrap` in
+`ToolchainManager`). This is upxBuilder's equivalent of Termux's
+`libtermux-bootstrap.so`; that library itself cannot be reused because every
+binary in Termux's bootstrap has `/data/data/com.termux/...` compiled into it
+(AndroidIDE rebuilds that entire package repo for its own package name).
+upx-bootstrap is assembled from path-independent pieces instead, so it works
+under any applicationId. Without the bundle, the app downloads the same files
+on first install. Installs are serialised with a mutex so the first-launch
+auto-setup and user commands can never corrupt the rootfs.
 
 **The proot launcher is verified, not assumed.** Some devices' seccomp filters
 kill generic Linux proot builds (the symptom is "killed by SIGSYS"). The app
