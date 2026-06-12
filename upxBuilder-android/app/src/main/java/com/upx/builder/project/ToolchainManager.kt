@@ -565,15 +565,19 @@ class ToolchainManager(
      *  Alpine's busybox post-install trigger dies under proot ("fchdir: Function
      *  not implemented") even though the packages install fine. We do the
      *  trigger's job ourselves — `busybox --install -s` relinks every applet —
-     *  and replace the scary-but-harmless ERROR lines with one clear note. */
+     *  and replace the scary-but-harmless ERROR lines with one clear note.
+     *  Because apk counts that dead trigger as an error in its exit code, success
+     *  is judged by the actual install state (`apk info -e` per package), never
+     *  by apk's exit code alone. */
     fun apkAdd(packages: String, onLine: (String, Boolean) -> Unit): Boolean {
         onLine("apk add $packages", false)
         var triggerNoise = false
-        val code = runInAlpine(
+        val script =
             "apk update >/dev/null 2>&1; apk add --no-cache $packages; rc=\$?; " +
-                "/bin/busybox --install -s >/dev/null 2>&1 || true; exit \$rc",
-            null, emptyList(),
-        ) { line, isError ->
+                "/bin/busybox --install -s >/dev/null 2>&1 || true; " +
+                "missing=0; for p in $packages; do apk info -e \"\$p\" >/dev/null 2>&1 || missing=1; done; " +
+                "if [ \$missing -eq 0 ]; then exit 0; fi; exit \$rc"
+        val code = runInAlpine(script, null, emptyList()) { line, isError ->
             if (line.contains("busybox-") && line.contains(".trigger")) triggerNoise = true
             else onLine(line, isError)
         }
